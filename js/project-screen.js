@@ -258,9 +258,18 @@ export async function renderProject(app, projectId, initialTab, isStale) {
     }
   }
 
+  // Opens the item form; if it fails, say so on screen instead of silently doing nothing.
+  function showForm(opts) {
+    openItemForm(opts).catch((err) => {
+      console.error(err);
+      view.clearPendingPin();
+      toast(`Could not open the item form: ${err.message}`, 5000);
+    });
+  }
+
   function newItemAt(x, y) {
     view.setPendingPin(x, y);
-    openItemForm({
+    showForm({
       project,
       drawing: current,
       item: { projectId, drawingId: current.id, x, y, status: 'Open', trade: '' },
@@ -270,7 +279,7 @@ export async function renderProject(app, projectId, initialTab, isStale) {
 
   // From the List tab's "+ Item": an item with no pin (it won't appear on any drawing).
   function newListItem() {
-    openItemForm({
+    showForm({
       project,
       drawing: null,
       item: { projectId, drawingId: null, x: null, y: null, status: 'Open', trade: '' },
@@ -282,7 +291,7 @@ export async function renderProject(app, projectId, initialTab, isStale) {
     const item = items.find((i) => i.id === id);
     if (!item) return;
     const drawing = drawings.find((d) => d.id === item.drawingId) || null;
-    openItemForm({ project, drawing, item, onClose: afterForm });
+    showForm({ project, drawing, item, onClose: afterForm });
   }
 
   // Drawing tab's PDF button: this sheet or every sheet, with the pins the filters show.

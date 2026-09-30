@@ -66,6 +66,12 @@ async function renderHome(token) {
 
 // ---------- Start up ----------
 
+// Show unexpected errors on screen, so a problem on a phone isn't silent.
+window.addEventListener('error', (e) => toast(`Error: ${e.message}`, 6000));
+window.addEventListener('unhandledrejection', (e) => {
+  toast(`Error: ${(e.reason && e.reason.message) || e.reason}`, 6000);
+});
+
 window.addEventListener('hashchange', route);
 route();
 
