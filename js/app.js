@@ -7,7 +7,7 @@
 //   #/p/<id>/photos -> a project, Photos tab
 
 import * as data from './db.js';
-import { el, toast, brandLink, debugLog } from './ui.js';
+import { el, toast, brandLink, debugLog, APP_VERSION } from './ui.js';
 import { renderProject } from './project-screen.js';
 
 const app = document.getElementById('app');
@@ -61,7 +61,8 @@ async function renderHome(token) {
 
   app.replaceChildren(
     el('header', { class: 'topbar' }, brandLink({ showName: true })),
-    el('main', { class: 'scroll' }, el('h2', { class: 'section-title' }, 'Projects'), form, list));
+    el('main', { class: 'scroll' }, el('h2', { class: 'section-title' }, 'Projects'), form, list,
+      el('p', { class: 'app-version' }, `Version ${APP_VERSION}`)));
 }
 
 // ---------- Start up ----------
@@ -75,7 +76,7 @@ window.addEventListener('unhandledrejection', (e) => {
   toast(`Error: ${(e.reason && e.reason.message) || e.reason}`, 6000);
   debugLog(`ERROR (async): ${(e.reason && e.reason.message) || e.reason}`);
 });
-debugLog(`debug on · app v8 · ${innerWidth}x${innerHeight} · ${navigator.userAgent.replace(/^Mozilla\/5\.0 /, '')}`);
+debugLog(`debug on · app ${APP_VERSION} · ${innerWidth}x${innerHeight} · ${navigator.userAgent.replace(/^Mozilla\/5\.0 /, '')}`);
 
 window.addEventListener('hashchange', route);
 route();
@@ -85,5 +86,17 @@ if (navigator.storage && navigator.storage.persist) navigator.storage.persist().
 
 // Offline support (only works over https:// or on localhost).
 if ('serviceWorker' in navigator) {
+  const hadVersion = !!navigator.serviceWorker.controller; // false on the very first visit
   navigator.serviceWorker.register('sw.js').catch((err) => console.warn('Offline mode unavailable:', err));
+  // A new version was just swapped in: reload so every file comes from it. Waits until
+  // no form or dialog is open, so nothing you're typing is lost.
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadVersion) return;
+    toast('Updating the app…');
+    const tryReload = () => {
+      if (document.querySelector('.modal-backdrop, .markup, .busy')) setTimeout(tryReload, 1500);
+      else location.reload();
+    };
+    setTimeout(tryReload, 800);
+  });
 }

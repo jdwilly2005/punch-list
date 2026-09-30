@@ -22,6 +22,10 @@ export function el(tag, props = {}, ...children) {
 // brand/logo.png (square, ~192px; PNG or JPG) and change BRAND.name. The logo is
 // used in the top bar (as the "home" button) and on exported drawing PDFs.
 // App-icon files for the home screen are separate: icons/ and manifest.json.
+// Shown on the Projects screen so you can tell which version a device is running.
+// Must match VERSION in sw.js — bump both on every publish.
+export const APP_VERSION = 'v9';
+
 export const BRAND = {
   name: 'Punch List',
   logo: new URL('../brand/logo.png', import.meta.url).href,
