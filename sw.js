@@ -4,7 +4,7 @@
 // network is slow (>3s) or down, use the copy saved on the phone.
 // When you add a new file to the app, add it to APP_FILES and bump VERSION.
 
-const VERSION = 'v7';
+const VERSION = 'v8';
 const CACHE = `punchlist-${VERSION}`;
 const APP_FILES = [
   './',

@@ -7,7 +7,7 @@
 //   #/p/<id>/photos -> a project, Photos tab
 
 import * as data from './db.js';
-import { el, toast, brandLink } from './ui.js';
+import { el, toast, brandLink, debugLog } from './ui.js';
 import { renderProject } from './project-screen.js';
 
 const app = document.getElementById('app');
@@ -67,10 +67,15 @@ async function renderHome(token) {
 // ---------- Start up ----------
 
 // Show unexpected errors on screen, so a problem on a phone isn't silent.
-window.addEventListener('error', (e) => toast(`Error: ${e.message}`, 6000));
+window.addEventListener('error', (e) => {
+  toast(`Error: ${e.message}`, 6000);
+  debugLog(`ERROR: ${e.message} (${e.filename}:${e.lineno})`);
+});
 window.addEventListener('unhandledrejection', (e) => {
   toast(`Error: ${(e.reason && e.reason.message) || e.reason}`, 6000);
+  debugLog(`ERROR (async): ${(e.reason && e.reason.message) || e.reason}`);
 });
+debugLog(`debug on · app v8 · ${innerWidth}x${innerHeight} · ${navigator.userAgent.replace(/^Mozilla\/5\.0 /, '')}`);
 
 window.addEventListener('hashchange', route);
 route();
