@@ -146,8 +146,10 @@ input.invalid { border-color: var(--danger); }
   position: absolute; left: 0; top: 0; width: 100%; height: 100%;
   display: block; pointer-events: none;
 }
-.sheet-layer > canvas.detail { width: auto; height: auto; } /* sized inline by drawing-view.js */
-.pin-layer { position: absolute; inset: 0; }
+/* Sharp layers on top of the zoomed sheet, in screen pixels (see drawing-view.js). */
+.detail-layer, .pin-layer { position: absolute; inset: 0; overflow: hidden; }
+.detail-layer { pointer-events: none; }
+.detail-layer > canvas { position: absolute; left: 0; top: 0; display: block; transform-origin: 0 0; }
 
 .stage-empty {
   position: absolute; inset: 0; display: flex; flex-direction: column;
@@ -232,11 +234,10 @@ input.invalid { border-color: var(--danger); }
 
 /* ---------- Pins ---------- */
 /* A pin is a 0x0 point at the exact spot; the marker is drawn above it.
-   --pin-scale (set by drawing-view.js) keeps pins the same size at any zoom. */
+   Pins live in a screen-pixel layer, so they stay the same size (and sharp) at any zoom. */
 
 .pin {
-  position: absolute; width: 0; height: 0;
-  transform: scale(var(--pin-scale, 1)); transform-origin: 0 0;
+  position: absolute; left: 0; top: 0; width: 0; height: 0; /* moved into place by drawing-view.js */
   --pin-color: var(--st-open);
 }
 .pin[data-status=progress] { --pin-color: var(--st-progress); }
@@ -292,6 +293,7 @@ input.invalid { border-color: var(--danger); }
 .field-hint { font-size: 12px; color: var(--muted); }
 .sheet-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .place-btn { flex: 0 0 auto; }
+.pin-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
 .status-seg { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .seg input { position: absolute; opacity: 0; pointer-events: none; }

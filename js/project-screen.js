@@ -363,7 +363,7 @@ export async function renderProject(app, projectId, initialTab, isStale) {
     const sheet = (moving && drawings.find((d) => d.id === item.drawingId)) || current || drawings[0];
     if (!current || current.id !== sheet.id) await showDrawing(sheet.id);
     placeText.textContent = `Tap the drawing where item ${data.itemName(item)} ${moving ? 'should move to' : 'goes'}.`
-      + (drawings.length > 1 ? ' Pick another sheet with the menu above.' : '');
+      + (drawings.length > 1 ? ` To use a different sheet, switch sheets with the menu above first.` : '');
     placeHint.hidden = false;
     hint.hidden = true;
     stage.classList.add('placing');

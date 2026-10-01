@@ -2,7 +2,13 @@
 //
 // How positioning works:
 //   The sheet sits in a "world" box sized in the drawing's own units
-//   (PDF points or image pixels). Pan/zoom is one CSS transform on that box.
+//   (PDF points or image pixels). Pan/zoom is one CSS transform on that box,
+//   which is fast but blurry when zoomed in (the browser enlarges a picture it
+//   made at the smaller size — very noticeable on iPhone/iPad). So two layers sit
+//   ON TOP of the world, in plain screen pixels, and are never enlarged:
+//     - detail layer: a sharp re-render of just the visible part of the sheet,
+//       made at screen resolution once a gesture settles;
+//     - pin layer: the pins, each moved to its spot on screen.
 //   Pins are stored as fractions of the page (x, y from 0 to 1), so a pin at
 //   x=0.5, y=0.5 is always dead-center no matter the zoom or screen size.
 
@@ -14,8 +20,8 @@ import { getPdf } from './sheet-render.js';
 // a single canvas at ~16.7M pixels).
 const MAX_BASE_PIXELS = 10_000_000;
 const MAX_BASE_SCALE = 4;
-// When zoomed past the base render's sharpness, the visible area is re-rendered crisp.
-const MAX_DETAIL_PIXELS = 6_000_000;
+// When zoomed in, the visible area is re-rendered sharp at screen resolution (capped for memory).
+const MAX_DETAIL_PIXELS = 8_000_000;
 const TAP_SLOP = 8; // px a finger can wiggle and still count as a tap / long-press
 const LONG_PRESS_MS = 500; // hold this long to drop a pin
 const GROUP_DIST = 26; // px on screen: pins closer than this overlap, so they're shown as one "+N" pin
@@ -36,9 +42,11 @@ export class DrawingView {
     this.onGroupTap = onGroupTap;
 
     this.sheetLayer = el('div', { class: 'sheet-layer' });
-    this.pinLayer = el('div', { class: 'pin-layer' });
-    this.world = el('div', { class: 'world' }, this.sheetLayer, this.pinLayer);
-    stage.append(this.world);
+    this.world = el('div', { class: 'world' }, this.sheetLayer);
+    this.detailLayer = el('div', { class: 'detail-layer' }); // screen pixels (see top of file)
+    this.pinLayer = el('div', { class: 'pin-layer' });       // screen pixels
+    stage.append(this.world, this.detailLayer, this.pinLayer);
+    this.detailToken = 0;
 
     this.s = 1; this.tx = 0; this.ty = 0; this.W = 1; this.H = 1;
     this.fitScale = 1;
@@ -108,6 +116,7 @@ export class DrawingView {
         await img.decode();
         if (token !== this.token) return;
         this.sheetLayer.prepend(img);
+        this.img = img;
       }
       this.ready = true;
       this.scheduleDetail();
@@ -123,11 +132,13 @@ export class DrawingView {
     if (this.baseTask) this.baseTask.cancel();
     if (this.detailTask) this.detailTask.cancel();
     this.baseTask = this.detailTask = null;
+    this.detailToken++;
     this.page = null;
+    this.img = null;
     clearTimeout(this.detailTimer);
     for (const c of this.sheetLayer.querySelectorAll('canvas')) c.width = c.height = 0; // frees memory on iOS
     this.sheetLayer.replaceChildren();
-    this.detailCanvas = null;
+    this.removeDetail();
     if (this.objectUrl) URL.revokeObjectURL(this.objectUrl);
     this.objectUrl = null;
   }
@@ -180,9 +191,18 @@ export class DrawingView {
   }
 
   makePin(x, y, label, dataset) {
-    return el('div', {
-      class: 'pin', dataset, style: `left:${x * 100}%;top:${y * 100}%`,
-    }, el('span', {}, label));
+    const pin = el('div', { class: 'pin', dataset }, el('span', {}, label));
+    pin.pageX = x;
+    pin.pageY = y;
+    this.placePin(pin);
+    return pin;
+  }
+
+  // Moves a pin to its spot on screen (whole pixels keep the number crisp).
+  placePin(pin) {
+    const x = Math.round(this.tx + pin.pageX * this.W * this.s);
+    const y = Math.round(this.ty + pin.pageY * this.H * this.s);
+    pin.style.transform = `translate(${x}px, ${y}px)`;
   }
 
   setPendingPin(x, y) {
@@ -274,8 +294,8 @@ export class DrawingView {
 
   apply() {
     this.world.style.transform = `translate(${this.tx}px, ${this.ty}px) scale(${this.s})`;
-    // Pins counter-scale so they stay the same size on screen at any zoom.
-    this.world.style.setProperty('--pin-scale', 1 / this.s);
+    for (const pin of this.pinLayer.children) this.placePin(pin);
+    this.placeDetail();
     this.scheduleDetail();
     // Zoom changed: regroup overlapping pins (throttled; panning alone doesn't change grouping).
     if (this.items && this.groupScale && Math.abs(Math.log(this.s / this.groupScale)) > 0.03 && !this.regroupTimer) {
@@ -419,23 +439,26 @@ export class DrawingView {
     this.zoomAt(this.localPoint(e), Math.exp(-e.deltaY * lines * speed));
   }
 
-  // ---------- Crisp re-render when zoomed in (PDF only) ----------
+  // ---------- Sharp re-render when zoomed in ----------
 
   scheduleDetail() {
     clearTimeout(this.detailTimer);
-    this.detailTimer = setTimeout(() => this.renderDetail(), 200);
+    this.detailTimer = setTimeout(() => this.renderDetail(), 150);
   }
 
+  // Re-draws the visible part of the sheet at screen resolution, in the detail layer.
   async renderDetail() {
-    if (!this.page || !this.ready) return;
-    const dpr = window.devicePixelRatio || 1;
-    const wanted = this.s * dpr; // screen pixels per drawing unit
-    if (wanted <= this.baseScale * 1.15) {
+    if (!this.ready || (!this.page && !this.img)) return;
+    // At the starting "fit" view (or zoomed out) the base picture is already sharp enough.
+    if (this.s <= this.fitScale * 1.05) {
+      this.detailToken++;
       if (this.detailTask) this.detailTask.cancel();
       this.detailTask = null;
       this.removeDetail();
       return;
     }
+    const dpr = window.devicePixelRatio || 1;
+    const wanted = this.s * dpr; // device pixels per drawing unit
     const r = this.stage.getBoundingClientRect();
     const x0 = Math.max(0, -this.tx / this.s);
     const y0 = Math.max(0, -this.ty / this.s);
@@ -444,28 +467,53 @@ export class DrawingView {
     if (x1 <= x0 || y1 <= y0) return;
     const areaAtWanted = (x1 - x0) * (y1 - y0) * wanted * wanted;
     const scale = wanted * Math.min(1, Math.sqrt(MAX_DETAIL_PIXELS / areaAtWanted));
+    const view = { s: this.s, x0, y0 }; // the zoom this render was made for
 
+    const token = ++this.detailToken;
     if (this.detailTask) this.detailTask.cancel();
+    this.detailTask = null;
     const canvas = document.createElement('canvas');
     canvas.width = Math.ceil((x1 - x0) * scale);
     canvas.height = Math.ceil((y1 - y0) * scale);
-    const viewport = this.page.getViewport({ scale, offsetX: -x0 * scale, offsetY: -y0 * scale });
-    const task = this.page.render({ canvasContext: canvas.getContext('2d'), viewport });
-    this.detailTask = task;
-    try {
-      await task.promise;
-    } catch {
-      return; // cancelled by a newer render
+    const ctx = canvas.getContext('2d');
+    if (this.page) {
+      const viewport = this.page.getViewport({ scale, offsetX: -x0 * scale, offsetY: -y0 * scale });
+      const task = this.page.render({ canvasContext: ctx, viewport });
+      this.detailTask = task;
+      try {
+        await task.promise;
+      } catch {
+        canvas.width = canvas.height = 0;
+        return; // cancelled by a newer render
+      }
+    } else {
+      // Image sheet: copy just the visible part of the image at screen resolution.
+      const k = this.img.naturalWidth / this.W;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(this.img, x0 * k, y0 * k, (x1 - x0) * k, (y1 - y0) * k, 0, 0, canvas.width, canvas.height);
     }
-    if (task !== this.detailTask || !this.page) return;
-    canvas.className = 'detail';
-    Object.assign(canvas.style, {
-      left: `${x0}px`, top: `${y0}px`,
-      width: `${canvas.width / scale}px`, height: `${canvas.height / scale}px`,
-    });
+    if (token !== this.detailToken) {
+      canvas.width = canvas.height = 0;
+      return; // a newer render replaced this one
+    }
+    canvas.style.width = `${(canvas.width / scale) * view.s}px`;
+    canvas.style.height = `${(canvas.height / scale) * view.s}px`;
     this.removeDetail();
-    this.sheetLayer.append(canvas);
+    this.detailLayer.append(canvas);
     this.detailCanvas = canvas;
+    this.detailView = view;
+    this.placeDetail();
+  }
+
+  // Keeps the sharp render lined up with the sheet while you pan / zoom (it's stretched a
+  // little until the gesture stops and it's re-drawn).
+  placeDetail() {
+    const c = this.detailCanvas;
+    if (!c) return;
+    const v = this.detailView;
+    const x = this.tx + v.x0 * this.s;
+    const y = this.ty + v.y0 * this.s;
+    c.style.transform = `translate(${x}px, ${y}px) scale(${this.s / v.s})`;
   }
 
   removeDetail() {

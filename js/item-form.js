@@ -1,7 +1,7 @@
 // item-form.js — the pop-up form for creating or editing a punch item.
 
 import * as data from './db.js';
-import { el, toast, statusKey } from './ui.js';
+import { el, toast, statusKey, choose } from './ui.js';
 import { preparePhoto, openMarkup } from './photo-markup.js';
 import { createTradeChips } from './trade-picker.js';
 
@@ -110,6 +110,10 @@ export async function openItemForm({ project, drawing, item, onClose, onTradesCh
     ? el('button', { type: 'button', class: 'btn place-btn', onclick: placeOnDrawing },
       pinned ? '📍 Move pin' : '📍 Place on a drawing')
     : null;
+  // Pinned items can also drop their pin and become list-only.
+  const unpinBtn = pinned && !isNew
+    ? el('button', { type: 'button', class: 'btn place-btn', onclick: removeFromDrawing }, 'Remove from drawing')
+    : null;
   const field = (label, control) => el('label', { class: 'field' }, el('span', { class: 'field-label' }, label), control);
 
   const form = el('form', { class: 'pl-sheet', novalidate: true },
@@ -129,7 +133,7 @@ export async function openItemForm({ project, drawing, item, onClose, onTradesCh
       el('div', { class: 'sheet-row' },
         el('p', { class: 'meta' }, drawing ? `Sheet: ${drawing.name}` : 'Not on a drawing (list only)',
           isNew ? null : ` · Created ${new Date(item.createdAt).toLocaleDateString()}`),
-        placeBtn),
+        el('div', { class: 'pin-actions' }, placeBtn, unpinBtn)),
       isNew ? null : el('button', { type: 'button', class: 'btn btn-danger', onclick: remove }, 'Delete item')));
 
   const backdrop = el('div', { class: 'pl-layer' }, form);
@@ -151,6 +155,22 @@ export async function openItemForm({ project, drawing, item, onClose, onTradesCh
     if (saved) close({ saved, place: true });
   }
 
+  // Keeps the item (List tab, exports, photos) but takes its pin off the drawing.
+  async function removeFromDrawing() {
+    const ok = await choose({
+      title: `Remove item ${data.itemName(item)} from the drawing?`,
+      message: 'It stays in the List tab, exports, and Photos — it just won\'t have a pin. '
+        + 'You can put it back on any sheet later with "Place on a drawing".',
+      choices: [{ label: 'Remove pin, keep item', value: true, kind: 'primary' }],
+    });
+    if (!ok) return;
+    const saved = await save(); // keep any edits made in the form
+    if (!saved) return;
+    const updated = await data.updateItem(saved.id, { drawingId: null, x: null, y: null });
+    toast(`Item ${data.itemName(updated)} is now list-only`);
+    close({ saved: updated });
+  }
+
   // Validates and saves the form. Returns the saved item, or null if it couldn't be saved.
   async function save() {
     const title = titleInput.value.trim();
@@ -161,7 +181,7 @@ export async function openItemForm({ project, drawing, item, onClose, onTradesCh
       return null;
     }
     saveBtn.disabled = true;
-    if (placeBtn) placeBtn.disabled = true;
+    for (const b of [placeBtn, unpinBtn]) if (b) b.disabled = true;
     try {
       const saved = await data.saveItem({
         ...item,
@@ -181,7 +201,7 @@ export async function openItemForm({ project, drawing, item, onClose, onTradesCh
       }
       toast(`Could not save: ${err.message}`, 3500);
       saveBtn.disabled = false;
-      if (placeBtn) placeBtn.disabled = false;
+      for (const b of [placeBtn, unpinBtn]) if (b) b.disabled = false;
       return null;
     }
   }
