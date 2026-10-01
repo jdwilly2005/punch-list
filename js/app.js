@@ -87,7 +87,12 @@ if (navigator.storage && navigator.storage.persist) navigator.storage.persist().
 // Offline support (only works over https:// or on localhost).
 if ('serviceWorker' in navigator) {
   const hadVersion = !!navigator.serviceWorker.controller; // false on the very first visit
-  navigator.serviceWorker.register('sw.js').catch((err) => console.warn('Offline mode unavailable:', err));
+  const registering = navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' });
+  registering.catch((err) => console.warn('Offline mode unavailable:', err));
+  // Check for a new version each time the app is opened or brought back to the front
+  // (a home-screen app usually resumes instead of starting fresh, which skips the browser's own check).
+  const checkForUpdate = () => registering.then((reg) => reg.update()).catch(() => {});
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkForUpdate(); });
   // A new version was just swapped in: reload so every file comes from it. Waits until
   // no form or dialog is open, so nothing you're typing is lost.
   navigator.serviceWorker.addEventListener('controllerchange', () => {
