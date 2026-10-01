@@ -10,7 +10,7 @@
 
 import * as data from './db.js';
 import { itemRef, compareItems, STATUSES } from './db.js';
-import { el, toast, busy, BRAND, STATUS_COLORS } from './ui.js';
+import { el, toast, busy, optionCards, BRAND, STATUS_COLORS } from './ui.js';
 import { getPdf } from './sheet-render.js';
 import { loadVendorScript, downloadBlob } from './export.js';
 
@@ -32,51 +32,82 @@ export function pdfFileName(projectName) {
 // sheetIds: which sheets to include; default = every sheet that has at least one of the items.
 // filterText: plain-English note of what's included ('' = everything).
 export async function drawingsPdf({ project, drawings, items, filterText = '', sheetIds = null }) {
+  const kit = await startPdf(`${project.name} – Punch list drawings`);
+  const sheets = drawings.filter((d) => (sheetIds ? sheetIds.includes(d.id) : items.some((i) => i.drawingId === d.id)));
+  if (!sheets.length) throw new Error('None of these items are on a drawing.');
+  for (const drawing of sheets) {
+    const pins = items.filter((i) => i.drawingId === drawing.id).sort(compareItems);
+    await addDrawingPage(kit, { drawing, pins, title: project.name, filterText });
+  }
+  return new Blob([await kit.out.save()], { type: 'application/pdf' });
+}
+
+// A new PDF plus what every page needs: fonts, the logo, and a cache of opened drawing files.
+// (Also used by report-pdf.js.)
+export async function startPdf(title) {
   await loadPdfLib();
   const { PDFDocument, StandardFonts } = window.PDFLib;
   const out = await PDFDocument.create();
-  out.setTitle(`${project.name} – Punch list drawings`);
+  out.setTitle(title);
   out.setCreator(BRAND.name);
   out.setProducer(BRAND.name);
-  const fonts = {
-    regular: await out.embedFont(StandardFonts.Helvetica),
-    bold: await out.embedFont(StandardFonts.HelveticaBold),
+  return {
+    out,
+    fonts: {
+      regular: await out.embedFont(StandardFonts.Helvetica),
+      bold: await out.embedFont(StandardFonts.HelveticaBold),
+    },
+    logo: await embedLogo(out),
+    sources: new Map(), // fileId -> Promise<PDFDocument | null>
+    today: new Date().toLocaleDateString(),
   };
-  const logo = await embedLogo(out);
-
-  const sheets = drawings.filter((d) => (sheetIds ? sheetIds.includes(d.id) : items.some((i) => i.drawingId === d.id)));
-  if (!sheets.length) throw new Error('None of these items are on a drawing.');
-
-  const sources = new Map(); // fileId -> Promise<PDFDocument | null>
-  const today = new Date().toLocaleDateString();
-  for (const drawing of sheets) {
-    const pins = items.filter((i) => i.drawingId === drawing.id).sort(compareItems);
-    await addSheet(out, { drawing, pins, project, filterText, today, fonts, logo, sources });
-  }
-  return new Blob([await out.save()], { type: 'application/pdf' });
 }
 
-async function addSheet(out, { drawing, pins, project, filterText, today, fonts, logo, sources }) {
-  // Page size = the sheet as shown in the app (PDF points, rotation already applied).
+// One sheet with its pins and the header strip.
+// paper: null = page is the drawing's own size (e.g. 24x36); or [w, h] in points (e.g. 11x17 =
+// [1224, 792]) to fit the drawing on that paper, turned to match the drawing's orientation.
+export async function addDrawingPage(kit, { drawing, pins, title, filterText, paper = null, footerSpace = 0 }) {
+  const { out, fonts, logo, sources, today } = kit;
+  // The sheet's size as shown in the app (PDF points, rotation already applied).
   const k = drawing.fileType === 'image' ? Math.min(1, MAX_IMAGE_PT / Math.max(drawing.widthPx, drawing.heightPx)) : 1;
-  const pw = drawing.widthPx * k;
-  const ph = drawing.heightPx * k;
-  const bandH = clamp(Math.min(pw, ph) * 0.045, 50, 110);
-  const page = out.addPage([pw, ph + bandH]);
+  const sw = drawing.widthPx * k;
+  const sh = drawing.heightPx * k;
+  let page;
+  let box; // where the drawing goes on the page
+  let bandH;
+  let pinSize = null;
+  if (!paper) {
+    bandH = clamp(Math.min(sw, sh) * 0.045, 50, 110);
+    page = out.addPage([sw, sh + bandH]);
+    box = { x: 0, y: 0, w: sw, h: sh };
+  } else {
+    const [a, b] = paper;
+    const [pw, ph] = sw >= sh ? [Math.max(a, b), Math.min(a, b)] : [Math.min(a, b), Math.max(a, b)];
+    page = out.addPage([pw, ph]);
+    bandH = 50;
+    const m = 18;
+    const area = { x: m, y: m + footerSpace, w: pw - 2 * m, h: ph - bandH - 2 * m - footerSpace };
+    const s = Math.min(area.w / sw, area.h / sh);
+    box = { x: area.x + (area.w - sw * s) / 2, y: area.y + (area.h - sh * s) / 2, w: sw * s, h: sh * s };
+    page.drawRectangle({ x: box.x, y: box.y, width: box.w, height: box.h, borderColor: color('#d5dae1'), borderWidth: 0.75 });
+    pinSize = 15;
+  }
 
-  if (drawing.fileType === 'pdf') await placePdfPage(out, page, drawing, pw, ph, sources);
-  else await placeImage(out, page, drawing, pw, ph);
+  if (drawing.fileType === 'pdf') await placePdfPage(out, page, drawing, box, sources);
+  else await placeImage(out, page, drawing, box);
 
-  drawPins(page, pins, pw, ph, fonts.bold);
+  drawPins(page, pins, box, fonts.bold, pinSize);
   drawBand(page, {
-    x: 0, y: ph, w: pw, h: bandH, fonts, logo, pins, today,
-    title: project.name, sheet: drawing.name, filterText,
+    x: 0, y: page.getHeight() - bandH, w: page.getWidth(), h: bandH, fonts, logo, pins, today,
+    title, sheet: drawing.name, filterText,
   });
+  return page;
 }
 
 // ---------- The drawing itself ----------
 
-async function placePdfPage(out, page, drawing, pw, ph, sources) {
+// box: { x, y, w, h } on the page where the sheet goes (the sheet is scaled to fill it).
+async function placePdfPage(out, page, drawing, box, sources) {
   const { PDFDocument, degrees } = window.PDFLib;
   if (!sources.has(drawing.fileId)) {
     sources.set(drawing.fileId, (async () => {
@@ -91,19 +122,24 @@ async function placePdfPage(out, page, drawing, pw, ph, sources) {
       // The app shows the page's crop box (trimmed to its media box), like any PDF viewer.
       const crop = sp.getCropBox();
       const media = sp.getMediaBox();
-      const box = {
+      const clip = {
         left: Math.max(crop.x, media.x),
         bottom: Math.max(crop.y, media.y),
         right: Math.min(crop.x + crop.width, media.x + media.width),
         top: Math.min(crop.y + crop.height, media.y + media.height),
       };
-      const embedded = await out.embedPage(sp, box);
+      const embedded = await out.embedPage(sp, clip);
+      const s = box.w / drawing.widthPx; // 1 = full size
       // Pages can be stored sideways with a "rotate" setting. Turn the page so it
       // matches what the app shows; pdf-lib rotates around the bottom-left corner.
       const rot = (((sp.getRotation().angle || 0) % 360) + 360) % 360;
-      const at = { 0: [0, 0], 90: [0, ph], 180: [pw, ph], 270: [pw, 0] }[rot] || [0, 0];
+      const at = { 0: [0, 0], 90: [0, box.h], 180: [box.w, box.h], 270: [box.w, 0] }[rot] || [0, 0];
       page.drawPage(embedded, {
-        x: at[0], y: at[1], width: box.right - box.left, height: box.top - box.bottom, rotate: degrees(-rot),
+        x: box.x + at[0],
+        y: box.y + at[1],
+        width: (clip.right - clip.left) * s,
+        height: (clip.top - clip.bottom) * s,
+        rotate: degrees(-rot),
       });
       return;
     } catch (err) {
@@ -123,10 +159,10 @@ async function placePdfPage(out, page, drawing, pw, ph, sources) {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   await pdfPage.render({ canvasContext: ctx, viewport: vp }).promise;
   const jpg = await canvasToJpeg(canvas);
-  page.drawImage(await out.embedJpg(jpg), { x: 0, y: 0, width: pw, height: ph });
+  page.drawImage(await out.embedJpg(jpg), { x: box.x, y: box.y, width: box.w, height: box.h });
 }
 
-async function placeImage(out, page, drawing, pw, ph) {
+async function placeImage(out, page, drawing, box) {
   const blob = await data.getFileBlob(drawing.fileId);
   let image;
   if (blob.type === 'image/png') {
@@ -146,7 +182,7 @@ async function placeImage(out, page, drawing, pw, ph) {
     bitmap.close();
     image = await out.embedJpg(await canvasToJpeg(canvas));
   }
-  page.drawImage(image, { x: 0, y: 0, width: pw, height: ph });
+  page.drawImage(image, { x: box.x, y: box.y, width: box.w, height: box.h });
 }
 
 async function canvasToJpeg(canvas) {
@@ -169,13 +205,13 @@ async function embedLogo(out) {
 
 // ---------- Pins and the header strip ----------
 
-function color(hex) {
+export function color(hex) {
   const n = parseInt(hex.slice(1), 16);
   return window.PDFLib.rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
 }
 
 // The standard PDF fonts only know Western characters; swap anything else for "?".
-function safeText(font, text) {
+export function safeText(font, text) {
   let s = '';
   for (const ch of String(text || '').replace(/[\r\n\t]+/g, ' ')) {
     try { font.widthOfTextAtSize(ch, 10); s += ch; } catch { s += '?'; }
@@ -184,7 +220,7 @@ function safeText(font, text) {
 }
 
 // Shortens text with "…" until it fits in maxW.
-function fitText(font, text, size, maxW) {
+export function fitText(font, text, size, maxW) {
   let s = safeText(font, text);
   if (font.widthOfTextAtSize(s, size) <= maxW) return s;
   while (s.length > 1 && font.widthOfTextAtSize(`${s}…`, size) > maxW) s = s.slice(0, -1);
@@ -192,7 +228,7 @@ function fitText(font, text, size, maxW) {
 }
 
 // A circle, or a pill if w > h (for custom tags like CB-12). (cx, cy) is the center.
-function pill(page, cx, cy, w, h, c) {
+export function pill(page, cx, cy, w, h, c) {
   const r = h / 2;
   if (w <= h) {
     page.drawCircle({ x: cx, y: cy, size: r, color: c });
@@ -204,15 +240,16 @@ function pill(page, cx, cy, w, h, c) {
 }
 
 // Same shape as the app's pins: a numbered circle with a point at the exact spot.
-function drawPins(page, pins, pw, ph, font) {
+// box: where the sheet sits on the page. size: pin circle size in points (default scales with the sheet).
+function drawPins(page, pins, box, font, size = null) {
   const white = color('#ffffff');
-  const d = clamp(Math.min(pw, ph) * 0.017, 17, 40); // circle size scales with the sheet
+  const d = size || clamp(Math.min(box.w, box.h) * 0.017, 17, 40);
   const border = d * 0.07;
   const fs = d * 0.42;
   for (const item of pins) {
     const c = color(STATUS_COLORS[item.status] || STATUS_COLORS.Open);
-    const tipX = item.x * pw;
-    const tipY = (1 - item.y) * ph; // app measures from the top; PDF from the bottom
+    const tipX = box.x + item.x * box.w;
+    const tipY = box.y + (1 - item.y) * box.h; // app measures from the top; PDF from the bottom
     const cy = tipY + d * 0.81;
     const label = safeText(font, itemRef(item));
     const tw = font.widthOfTextAtSize(label, fs);
@@ -292,43 +329,60 @@ export function openDrawingPdfDialog({ project, drawings, current, items, filter
   const sheetsWithPins = drawings.filter((d) => pinned.some((i) => i.drawingId === d.id));
   const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-  const run = async (sheetIds) => {
+  // Pick which sheets, then tap Export (picking alone never exports).
+  const exportBtn = el('button', { type: 'button', class: 'btn btn-primary', onclick: run }, 'Export');
+  const cards = optionCards({
+    value: current ? 'this' : null,
+    onSelect: () => { exportBtn.disabled = false; },
+    options: [
+      {
+        value: 'this',
+        label: 'This sheet',
+        note: current ? `${current.name} · ${plural(onCurrent.length, 'pin')}` : 'No sheet open',
+        disabled: !current,
+      },
+      {
+        value: 'all',
+        label: 'All sheets with pins',
+        note: sheetsWithPins.length
+          ? `${plural(sheetsWithPins.length, 'sheet')} · ${plural(pinned.length, 'pin')}`
+          : 'No pins match your filters',
+        disabled: !sheetsWithPins.length,
+      },
+    ],
+  });
+  exportBtn.disabled = !cards.value;
+
+  async function run() {
+    const sheetIds = cards.value === 'this' ? [current.id] : sheetsWithPins.map((d) => d.id);
+    exportBtn.disabled = true;
     const done = busy('Making PDF…');
     try {
       const blob = await drawingsPdf({ project, drawings, items: pinned, filterText, sheetIds });
       downloadBlob(blob, pdfFileName(project.name));
       close();
-      toast(`Saved ${plural(sheetIds ? sheetIds.length : sheetsWithPins.length, 'sheet')} as a PDF`);
+      toast(`Saved ${plural(sheetIds.length, 'sheet')} as a PDF`);
     } catch (err) {
       console.error(err);
       toast(`Could not make the PDF: ${err.message}`, 4000);
+      exportBtn.disabled = false;
     } finally {
       done();
     }
-  };
+  }
 
-  const thisBtn = el('button', { type: 'button', class: 'btn btn-primary export-choice', disabled: !current },
-    el('strong', {}, 'This sheet'),
-    el('small', {}, current ? `${current.name} · ${plural(onCurrent.length, 'pin')}` : 'No sheet open'));
-  thisBtn.addEventListener('click', () => run([current.id]));
-  const allBtn = el('button', { type: 'button', class: 'btn export-choice', disabled: !sheetsWithPins.length },
-    el('strong', {}, 'All sheets with pins'),
-    el('small', {}, sheetsWithPins.length
-      ? `${plural(sheetsWithPins.length, 'sheet')} · ${plural(pinned.length, 'pin')}`
-      : 'No pins match your filters'));
-  allBtn.addEventListener('click', () => run(sheetsWithPins.map((d) => d.id)));
-
-  const backdrop = el('div', { class: 'pl-layer' },
+  const layer = el('div', { class: 'pl-layer' },
     el('div', { class: 'pl-sheet' },
       el('div', { class: 'pl-sheet-head' },
         el('button', { type: 'button', class: 'btn btn-ghost', onclick: () => close() }, 'Cancel'),
         el('h2', {}, 'Drawings PDF'),
-        el('span', { class: 'head-spacer' })),
+        exportBtn),
       el('div', { class: 'pl-sheet-body' },
         el('p', { class: 'meta' }, filterText
           ? `Only the pins your filters show are included (${filterText}).`
           : 'All pins are included. Use the status chips or trade filter first to narrow it down.'),
-        thisBtn, allBtn)));
-  document.body.append(backdrop);
-  function close() { backdrop.remove(); }
+        cards.node,
+        el('p', { class: 'meta' }, 'For a full package with the item list and photos, use Export → Printed report on the List tab.'))));
+  document.body.append(layer);
+  function close() { layer.remove(); }
 }

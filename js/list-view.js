@@ -4,7 +4,7 @@
 // onItemSaved, so the drawing's pins update to match.
 
 import * as data from './db.js';
-import { el, toast, statusKey } from './ui.js';
+import { el, toast, busy, statusKey, optionCards } from './ui.js';
 import { itemRef, itemName, compareItems, tradesText } from './db.js';
 import { openTradePicker } from './trade-picker.js';
 import { matches, isFiltering, describeFilter } from './filters.js';
@@ -12,6 +12,7 @@ import {
   toCsv, toXlsx, toProcoreXlsx, exportFileName, downloadBlob,
 } from './export.js';
 import { drawingsPdf, pdfFileName } from './pdf-export.js';
+import { reportPdf, reportFileName } from './report-pdf.js';
 
 const COLUMNS = [
   { key: 'number', label: '#' },
@@ -25,14 +26,14 @@ const COLUMNS = [
 ];
 
 const SORT_KEY = 'punchlist:listSort';
-const PDF_TOO_KEY = 'punchlist:exportPdfToo';
 const NO_SHEET = '__none__'; // sheet filter: items that aren't on a drawing
 
-function loadPdfToo() {
-  try { return localStorage.getItem(PDF_TOO_KEY) === '1'; } catch { return false; }
+// Export dialog choices remembered on this device (conveniences only).
+function loadPref(key, fallback) {
+  try { const v = localStorage.getItem(`punchlist:${key}`); return v == null ? fallback : v; } catch { return fallback; }
 }
-function savePdfToo(on) {
-  try { localStorage.setItem(PDF_TOO_KEY, on ? '1' : '0'); } catch { /* not remembered */ }
+function savePref(key, value) {
+  try { localStorage.setItem(`punchlist:${key}`, value); } catch { /* not remembered */ }
 }
 
 function loadSort() {
@@ -198,6 +199,7 @@ export function createListView({
     return parts.length ? parts.join(' · ') : 'All items';
   }
 
+  // Pick a format, then tap Export (picking alone never exports).
   function openExportDialog() {
     const rows = shownItems();
     if (!rows.length) {
@@ -206,95 +208,118 @@ export function createListView({
     }
     const narrowed = rows.length < ctx().items.length;
     const pinned = rows.filter((i) => i.drawingId);
+    const closedCount = rows.filter((i) => i.status === 'Closed').length;
+    const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-    // "Also download the drawings PDF" — remembered on this device.
-    const pdfToo = el('input', { type: 'checkbox', checked: loadPdfToo() && pinned.length > 0, disabled: !pinned.length });
-    pdfToo.addEventListener('change', () => savePdfToo(pdfToo.checked));
+    const options = [
+      { value: 'report', label: 'Printed report (.pdf)', note: 'Cover, item list, drawings on 11×17, photos 4 per page — to print or email to a trade' },
+      { value: 'xlsx', label: 'Excel (.xlsx)', note: 'Formatted, with a summary tab' },
+      { value: 'csv', label: 'CSV', note: 'Plain text, opens anywhere' },
+      { value: 'procore', label: 'Procore import (.xlsx)', note: 'Filled-in copy of Procore\'s punch item import template' },
+      {
+        value: 'pdf',
+        label: 'Drawings with pins (.pdf)',
+        note: pinned.length ? 'Each sheet at full size with these items\' pins' : 'None of these items are on a drawing',
+        disabled: !pinned.length,
+      },
+    ];
 
-    const makePdf = async () => {
-      const { project, drawings } = ctx();
-      return drawingsPdf({ project, drawings, items: pinned, filterText: describeFilters() });
+    // The "also save…" checkbox changes with the choice.
+    const extras = {
+      report: { key: 'exportReportXlsx', label: 'Also save the Excel list (.xlsx)' },
+      xlsx: { key: 'exportPdfToo', label: 'Also save the drawings with pins (.pdf)', needsPins: true },
+      csv: { key: 'exportPdfToo', label: 'Also save the drawings with pins (.pdf)', needsPins: true },
+      procore: { key: 'exportPdfToo', label: 'Also save the drawings with pins (.pdf)', needsPins: true },
     };
+    const alsoBox = el('input', { type: 'checkbox' });
+    const alsoText = el('span', {});
+    const alsoRow = el('label', { class: 'check-row' }, alsoBox, alsoText);
+    alsoBox.addEventListener('change', () => {
+      const x = extras[cards.value];
+      if (x) savePref(x.key, alsoBox.checked ? '1' : '0');
+    });
+    const procoreNote = el('p', { class: 'meta' },
+      'Procore\'s template has no status or photo columns, and people / due date / priority are '
+      + 'left blank to fill in Procore. Get the photos from the Photos tab.',
+      closedCount ? el('strong', { class: 'warn' },
+        ` Heads up: ${closedCount} of these ${closedCount === 1 ? 'is' : 'are'} Closed — `
+        + 'turn off the Closed chip first if you don\'t want to import them.') : null);
+    const exportBtn = el('button', { type: 'button', class: 'btn btn-primary', onclick: run }, 'Export');
 
-    const run = async (kind, btn) => {
-      const buttons = [xlsxBtn, csvBtn, procoreBtn, pdfBtn];
-      for (const b of buttons) b.disabled = true;
-      const note = btn.querySelector('small');
-      const noteText = note.textContent;
+    const update = (kind) => {
+      savePref('exportKind', kind || '');
+      const x = extras[kind];
+      alsoRow.hidden = !x;
+      if (x) {
+        alsoText.textContent = x.label;
+        alsoBox.disabled = !!x.needsPins && !pinned.length;
+        alsoBox.checked = !alsoBox.disabled && loadPref(x.key, '0') === '1';
+      }
+      procoreNote.hidden = kind !== 'procore';
+      exportBtn.disabled = !kind;
+    };
+    const cards = optionCards({ options, value: loadPref('exportKind', null), onSelect: update });
+    update(cards.value);
+
+    async function run() {
+      const kind = cards.value;
+      if (!kind) return;
+      const also = !alsoRow.hidden && alsoBox.checked;
+      const { project, drawings, filter } = ctx();
+      const filterText = describeFilters();
+      exportBtn.disabled = true;
+      const done = busy(kind === 'report' ? 'Making the report…' : 'Exporting…');
       try {
-        const { project, drawings } = ctx();
-        if (kind === 'pdf') {
-          note.textContent = 'Making PDF…';
-          downloadBlob(await makePdf(), pdfFileName(project.name));
+        const files = []; // [blob, fileName]
+        if (kind === 'report') {
+          files.push([await reportPdf({ project, drawings, items: rows, filter, filterText }), reportFileName(project.name, filter)]);
+          if (also) files.push([await toXlsx(rows, drawings, project, filterText), exportFileName(project.name, 'xlsx')]);
+        } else if (kind === 'pdf') {
+          files.push([await drawingsPdf({ project, drawings, items: pinned, filterText }), pdfFileName(project.name)]);
         } else {
-          let blob;
-          let fileName;
           if (kind === 'procore') {
-            blob = await toProcoreXlsx(rows, drawings);
-            fileName = exportFileName(project.name, 'xlsx').replace('Punch List', 'Procore Punch Import');
+            files.push([await toProcoreXlsx(rows, drawings),
+              exportFileName(project.name, 'xlsx').replace('Punch List', 'Procore Punch Import')]);
+          } else if (kind === 'xlsx') {
+            files.push([await toXlsx(rows, drawings, project, filterText), exportFileName(project.name, 'xlsx')]);
           } else {
-            blob = kind === 'xlsx' ? await toXlsx(rows, drawings, project, describeFilters()) : toCsv(rows, drawings);
-            fileName = exportFileName(project.name, kind);
+            files.push([toCsv(rows, drawings), exportFileName(project.name, 'csv')]);
           }
-          const pdf = pdfToo.checked ? (note.textContent = 'Making PDF…', await makePdf()) : null;
-          downloadBlob(blob, fileName);
-          if (pdf) {
-            await new Promise((r) => setTimeout(r, 400)); // browsers drop downloads fired all at once
-            downloadBlob(pdf, pdfFileName(project.name));
-          }
+          if (also) files.push([await drawingsPdf({ project, drawings, items: pinned, filterText }), pdfFileName(project.name)]);
+        }
+        for (let i = 0; i < files.length; i++) {
+          if (i) await new Promise((r) => setTimeout(r, 400)); // browsers drop downloads fired all at once
+          downloadBlob(...files[i]);
         }
         close();
         toast(kind === 'pdf'
-          ? `Saved ${pinned.length} pin${pinned.length === 1 ? '' : 's'} on the drawings`
-          : `Exported ${rows.length} item${rows.length === 1 ? '' : 's'}${pdfToo.checked ? ' + drawings PDF' : ''}`);
+          ? `Saved ${plural(pinned.length, 'pin')} on the drawings`
+          : `Exported ${plural(rows.length, 'item')}${files.length > 1 ? ` (${files.length} files)` : ''}`);
       } catch (err) {
         console.error(err);
         toast(`Export failed: ${err.message}`, 4000);
-        note.textContent = noteText;
-        for (const b of buttons) b.disabled = false;
-        pdfBtn.disabled = !pinned.length;
+        exportBtn.disabled = false;
+      } finally {
+        done();
       }
-    };
-    const xlsxBtn = el('button', { type: 'button', class: 'btn btn-primary export-choice' },
-      el('strong', {}, 'Excel (.xlsx)'), el('small', {}, 'Formatted, with a summary tab'));
-    const csvBtn = el('button', { type: 'button', class: 'btn export-choice' },
-      el('strong', {}, 'CSV'), el('small', {}, 'Plain text, opens anywhere'));
-    const procoreBtn = el('button', { type: 'button', class: 'btn export-choice' },
-      el('strong', {}, 'Procore import (.xlsx)'),
-      el('small', {}, 'Filled-in copy of Procore\'s punch item import template'));
-    const pdfBtn = el('button', { type: 'button', class: 'btn export-choice', disabled: !pinned.length },
-      el('strong', {}, 'Drawings with pins (.pdf)'),
-      el('small', {}, pinned.length
-        ? 'Each sheet with these items\' pins, plus a legend'
-        : 'None of these items are on a drawing'));
-    xlsxBtn.addEventListener('click', () => run('xlsx', xlsxBtn));
-    csvBtn.addEventListener('click', () => run('csv', csvBtn));
-    procoreBtn.addEventListener('click', () => run('procore', procoreBtn));
-    pdfBtn.addEventListener('click', () => run('pdf', pdfBtn));
-    const closedCount = rows.filter((i) => i.status === 'Closed').length;
+    }
 
-    const backdrop = el('div', { class: 'pl-layer' },
+    const layer = el('div', { class: 'pl-layer' },
       el('div', { class: 'pl-sheet' },
         el('div', { class: 'pl-sheet-head' },
           el('button', { type: 'button', class: 'btn btn-ghost', onclick: () => close() }, 'Cancel'),
-          el('h2', {}, 'Export punch list'),
-          el('span', { class: 'head-spacer' })),
+          el('h2', {}, 'Export'),
+          exportBtn),
         el('div', { class: 'pl-sheet-body' },
           el('p', { class: 'meta' },
-            `${rows.length} item${rows.length === 1 ? '' : 's'}, in the order shown in the list.`,
+            `${plural(rows.length, 'item')}, as shown in the list.`,
             narrowed || isFiltering(ctx().filter) ? ` Included: ${describeFilters()}.` : ''),
-          xlsxBtn, csvBtn, procoreBtn,
-          el('label', { class: 'check-row' }, pdfToo,
-            el('span', {}, 'Also download the drawings with pins (.pdf) as a separate file')),
-          pdfBtn,
-          el('p', { class: 'meta' },
-            'Procore\'s template has no status or photo columns, and people / due date / priority are '
-            + 'left blank to fill in Procore. Get the photos from the Photos tab.',
-            closedCount ? el('strong', { class: 'warn' },
-              ` Heads up: ${closedCount} of these ${closedCount === 1 ? 'is' : 'are'} Closed — `
-              + 'turn off the Closed chip first if you don\'t want to import them.') : null))));
-    document.body.append(backdrop);
-    function close() { backdrop.remove(); }
+          cards.node,
+          alsoRow,
+          procoreNote,
+          el('p', { class: 'meta' }, 'Pick a format, then tap Export.'))));
+    document.body.append(layer);
+    function close() { layer.remove(); }
   }
 
   // ----- One row -----

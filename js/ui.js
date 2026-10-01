@@ -24,7 +24,7 @@ export function el(tag, props = {}, ...children) {
 // App-icon files for the home screen are separate: icons/ and manifest.json.
 // Shown on the Projects screen so you can tell which version a device is running.
 // Must match VERSION in sw.js — bump both on every publish.
-export const APP_VERSION = 'v14';
+export const APP_VERSION = 'v15';
 
 export const BRAND = {
   name: 'Punch List',
@@ -104,4 +104,24 @@ export function choose({ title, message = '', choices }) {
       resolve(value);
     }
   });
+}
+
+// A list of options where tapping one only SELECTS it (a separate button then acts on it),
+// so a stray tap never starts an export.
+//   options: [{ value, label, note, disabled }]
+// Returns { node, value } — `value` is the selected option's value (or null).
+export function optionCards({ options, value = null, onSelect = () => {} }) {
+  let selected = options.some((o) => o.value === value && !o.disabled) ? value : null;
+  const node = el('div', { class: 'option-cards', role: 'radiogroup' });
+  const render = () => node.replaceChildren(...options.map((o) => el('button', {
+    type: 'button',
+    class: 'option-card',
+    role: 'radio',
+    'aria-checked': String(o.value === selected),
+    disabled: !!o.disabled,
+    onclick: () => { selected = o.value; render(); onSelect(selected); },
+  }, el('span', { class: 'option-dot', 'aria-hidden': 'true' }),
+  el('span', { class: 'option-text' }, el('strong', {}, o.label), o.note ? el('small', {}, o.note) : null))));
+  render();
+  return { node, get value() { return selected; } };
 }

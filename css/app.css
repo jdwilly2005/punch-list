@@ -327,7 +327,6 @@ input.invalid { border-color: var(--danger); }
 }
 .summary-tip { margin-left: auto; }
 @media (max-width: 599px) { .summary-tip { display: none; } }
-.export-choice { flex-direction: column; align-items: flex-start; gap: 2px; min-height: 60px; padding: 10px 16px; text-align: left; }
 .warn { color: var(--danger); font-weight: 600; }
 .check-row { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 14px; cursor: pointer; }
 .check-row input { width: 22px; height: 22px; flex: 0 0 auto; accent-color: var(--accent); }
@@ -349,6 +348,23 @@ input.invalid { border-color: var(--danger); }
 .trade-cell:hover { border-color: var(--border); }
 .trade-cell.empty-cell { color: #b0b7c1; }
 
+/* ---------- Pick-then-confirm options (ui.js optionCards) ---------- */
+.option-cards { display: flex; flex-direction: column; gap: 8px; }
+.option-card {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 60px; padding: 10px 14px;
+  font: inherit; text-align: left; color: var(--text); background: var(--surface);
+  border: 1.5px solid var(--border); border-radius: 12px; cursor: pointer;
+}
+.option-card[aria-checked=true] { border-color: var(--accent); background: #fff4ec; }
+.option-card:disabled { opacity: .5; cursor: default; }
+.option-dot {
+  flex: 0 0 auto; width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--border); background: var(--surface);
+}
+.option-card[aria-checked=true] .option-dot { border-color: var(--accent); box-shadow: inset 0 0 0 4px var(--surface); background: var(--accent); }
+.option-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.option-text strong { font-size: 15px; }
+.option-text small { font-size: 13px; color: var(--muted); }
+
 /* ---------- Choice pop-up (ui.js choose) ---------- */
 .pl-choose { max-width: 440px; }
 .pl-choose .pl-sheet-body { gap: 10px; }
@@ -357,7 +373,6 @@ input.invalid { border-color: var(--danger); }
 .choose-btn { width: 100%; min-height: 48px; flex-direction: column; gap: 2px; }
 .choose-btn small { font-size: 12px; font-weight: 400; opacity: .85; }
 .btn-danger.choose-btn { background: var(--danger); color: #fff; font-weight: 600; }
-.export-choice small { font-weight: 400; opacity: .85; font-size: 13px; }
 .toolbar input[type=search] { flex: 1 1 auto; min-width: 0; }
 @media (max-width: 479px) {
   .toolbar:has(input[type=search]) { flex-wrap: wrap; }
