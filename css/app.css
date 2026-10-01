@@ -16,6 +16,7 @@
   --st-progress: #e37400;
   --st-review: #1a73e8;
   --st-closed: #188038;
+  --pin-group: #59636e;       /* "+N" pin for overlapping pins */
 
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -160,6 +161,14 @@ input.invalid { border-color: var(--danger); }
   position: absolute; right: 12px; bottom: calc(12px + var(--safe-bottom));
   box-shadow: 0 2px 8px rgba(0,0,0,.25);
 }
+/* "Tap the drawing where item #5 goes" (placing an existing item) */
+.place-hint {
+  position: absolute; left: 50%; top: 12px; transform: translateX(-50%); width: max-content; max-width: calc(100% - 24px);
+  display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 14px; border-radius: 12px;
+  background: var(--accent); color: #fff; font-size: 14px; font-weight: 600; box-shadow: 0 2px 10px rgba(0,0,0,.3);
+}
+.place-hint .btn { flex: 0 0 auto; }
+.stage.placing { cursor: crosshair; }
 .hint {
   position: absolute; left: 12px; bottom: calc(12px + var(--safe-bottom)); max-width: calc(100% - 100px);
   background: rgba(31,41,51,.85); color: #fff; font-size: 13px;
@@ -234,6 +243,7 @@ input.invalid { border-color: var(--danger); }
 .pin[data-status=review]   { --pin-color: var(--st-review); }
 .pin[data-status=closed]   { --pin-color: var(--st-closed); }
 .pin[data-status=pending]  { --pin-color: #1f2933; }
+.pin[data-status=group]    { --pin-color: var(--pin-group); }
 .pin > span {
   /* A circle for numbers; stretches into a pill for custom tags like CB-12. */
   position: absolute; left: 0; translate: -50% 0; top: -42px; min-width: 32px; height: 32px; padding: 0 6px;
@@ -280,6 +290,8 @@ input.invalid { border-color: var(--danger); }
 .field-label { font-size: 13px; font-weight: 600; color: var(--muted); }
 .meta { margin: 0; font-size: 13px; color: var(--muted); }
 .field-hint { font-size: 12px; color: var(--muted); }
+.sheet-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.place-btn { flex: 0 0 auto; }
 
 .status-seg { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .seg input { position: absolute; opacity: 0; pointer-events: none; }

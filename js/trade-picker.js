@@ -23,14 +23,15 @@ export function createTradeChips({ project, selected, onChange = () => {}, onTra
   function render() {
     const names = [...project.trades];
     for (const t of chosen) if (!names.includes(t)) names.push(t);
-    node.replaceChildren(
+    node.replaceChildren(...[ // (filter: replaceChildren would print an empty slot as the text "null")
       ...names.map((t) => el('button', {
         type: 'button', class: 'trade-chip', 'aria-pressed': String(chosen.includes(t)), onclick: () => toggle(t),
       }, t)),
       el('button', { type: 'button', class: 'trade-chip trade-chip-tool', onclick: add }, '＋ Add trade'),
       project.trades.length
         ? el('button', { type: 'button', class: 'trade-chip trade-chip-tool', onclick: manage }, '⚙︎ Manage')
-        : null);
+        : null,
+    ].filter(Boolean));
   }
 
   function changed() {

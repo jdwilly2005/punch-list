@@ -18,19 +18,22 @@ const MAX_BASE_SCALE = 4;
 const MAX_DETAIL_PIXELS = 6_000_000;
 const TAP_SLOP = 8; // px a finger can wiggle and still count as a tap / long-press
 const LONG_PRESS_MS = 500; // hold this long to drop a pin
+const GROUP_DIST = 26; // px on screen: pins closer than this overlap, so they're shown as one "+N" pin
 
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 
 export class DrawingView {
   // onLongPress(x, y): finger held on the sheet (x, y are 0–1 page fractions)
-  // onEmptyTap(): quick tap on the sheet but not on a pin
+  // onEmptyTap(x, y): quick tap on the sheet but not on a pin
   // onPinTap(itemId): tap on an existing pin
-  constructor(stage, { onLongPress, onEmptyTap, onPinTap }) {
+  // onGroupTap(itemIds, x, y): tap on a "+N" pin (several overlapping pins)
+  constructor(stage, { onLongPress, onEmptyTap, onPinTap, onGroupTap }) {
     this.stage = stage;
     this.onLongPress = onLongPress;
     this.onEmptyTap = onEmptyTap;
     this.onPinTap = onPinTap;
+    this.onGroupTap = onGroupTap;
 
     this.sheetLayer = el('div', { class: 'sheet-layer' });
     this.pinLayer = el('div', { class: 'pin-layer' });
@@ -130,6 +133,7 @@ export class DrawingView {
   }
 
   destroy() {
+    clearTimeout(this.regroupTimer);
     window.removeEventListener('pointerup', this.onWindowUp);
     window.removeEventListener('pointercancel', this.onWindowUp);
     this.token++;
@@ -141,10 +145,38 @@ export class DrawingView {
 
   setItems(items) {
     this.items = items;
-    const pins = items.map((it) => this.makePin(it.x, it.y, itemRef(it), {
-      id: it.id, status: statusKey(it.status),
-    }));
+    this.renderPins();
+  }
+
+  // Draws the pins. Pins that would overlap at the current zoom are merged into one gray
+  // "+N" pin; zooming in far enough splits them apart again (see apply()).
+  renderPins() {
+    this.groupScale = this.s;
+    const pins = this.groupPins(this.items || []).map((g) => {
+      if (g.length === 1) {
+        const it = g[0];
+        return this.makePin(it.x, it.y, itemRef(it), { id: it.id, status: statusKey(it.status) });
+      }
+      const x = g.reduce((sum, it) => sum + it.x, 0) / g.length;
+      const y = g.reduce((sum, it) => sum + it.y, 0) / g.length;
+      return this.makePin(x, y, `+${g.length}`, { group: g.map((it) => it.id).join(','), status: 'group', x, y });
+    });
     this.pinLayer.replaceChildren(...pins, ...(this.pendingPin ? [this.pendingPin] : []));
+  }
+
+  // Splits items into groups of pins that overlap on screen at the current zoom.
+  groupPins(items) {
+    const sx = this.W * this.s;
+    const sy = this.H * this.s;
+    const groups = []; // { x, y (screen px of the first pin), members }
+    for (const it of items) {
+      const px = it.x * sx;
+      const py = it.y * sy;
+      const near = groups.find((g) => Math.abs(g.x - px) < GROUP_DIST && Math.abs(g.y - py) < GROUP_DIST);
+      if (near) near.members.push(it);
+      else groups.push({ x: px, y: py, members: [it] });
+    }
+    return groups.map((g) => g.members);
   }
 
   makePin(x, y, label, dataset) {
@@ -191,8 +223,32 @@ export class DrawingView {
     this.apply();
   }
 
+  // Zoom in on a "+N" group just far enough that its pins spread apart (as far as the
+  // zoom allows — pins at the exact same spot stay grouped; the group menu still lists them).
+  zoomToSeparate(items) {
+    const r = this.stage.getBoundingClientRect();
+    const x = items.reduce((sum, it) => sum + it.x, 0) / items.length;
+    const y = items.reduce((sum, it) => sum + it.y, 0) / items.length;
+    let closest = Infinity; // page units between the closest two pins (the larger of the x / y gaps)
+    for (let i = 0; i < items.length; i++) {
+      for (let j = i + 1; j < items.length; j++) {
+        const gap = Math.max(Math.abs(items[i].x - items[j].x) * this.W, Math.abs(items[i].y - items[j].y) * this.H);
+        closest = Math.min(closest, gap);
+      }
+    }
+    const needed = closest > 0 ? (GROUP_DIST * 1.5) / closest : Infinity;
+    const s = this.clampScale(Math.max(this.s * 2, needed));
+    this.s = s;
+    this.tx = r.width / 2 - x * this.W * s;
+    this.ty = r.height / 2 - y * this.H * s;
+    this.userMoved = true;
+    this.apply();
+  }
+
   flashPin(id) {
-    const pin = [...this.pinLayer.children].find((p) => p.dataset.id === id);
+    if (this.groupScale !== this.s) this.renderPins(); // make sure grouping matches the current zoom
+    const pin = [...this.pinLayer.children].find(
+      (p) => p.dataset.id === id || (p.dataset.group || '').split(',').includes(id));
     if (!pin) return;
     pin.classList.remove('flash');
     void pin.offsetWidth; // restart the animation
@@ -221,6 +277,10 @@ export class DrawingView {
     // Pins counter-scale so they stay the same size on screen at any zoom.
     this.world.style.setProperty('--pin-scale', 1 / this.s);
     this.scheduleDetail();
+    // Zoom changed: regroup overlapping pins (throttled; panning alone doesn't change grouping).
+    if (this.items && this.groupScale && Math.abs(Math.log(this.s / this.groupScale)) > 0.03 && !this.regroupTimer) {
+      this.regroupTimer = setTimeout(() => { this.regroupTimer = null; this.renderPins(); }, 40);
+    }
   }
 
   localPoint(e) {
@@ -311,7 +371,13 @@ export class DrawingView {
       this.onPinTap(g.pinEl.dataset.id);
       return;
     }
-    if (!g.pinEl && this.pageFraction(g.start)) this.onEmptyTap();
+    if (g.pinEl && g.pinEl.dataset.group) {
+      const d = g.pinEl.dataset;
+      this.onGroupTap(d.group.split(','), Number(d.x), Number(d.y));
+      return;
+    }
+    const spot = !g.pinEl && this.pageFraction(g.start);
+    if (spot) this.onEmptyTap(spot.x, spot.y);
   }
 
   // Screen point -> {x, y} as 0–1 fractions of the page, or null if off the sheet.

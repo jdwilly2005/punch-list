@@ -9,7 +9,9 @@ import { createTradeChips } from './trade-picker.js';
 // (drawingId/x/y null = a list-only item with no pin). drawing: its sheet, or null.
 // onClose(result) is called with { saved } / { deleted } / null (cancelled).
 // onTradesChanged(): the project's trade list was changed from inside the form.
-export async function openItemForm({ project, drawing, item, onClose, onTradesChanged = () => {} }) {
+// canPlace: the project has drawings, so offer "Place on a drawing" / "Move pin"
+//   (saves, then onClose({ saved, place: true }) — the project screen does the placing).
+export async function openItemForm({ project, drawing, item, onClose, onTradesChanged = () => {}, canPlace = false }) {
   const isNew = !item.id;
   const photos = isNew ? [] : (await data.listPhotos(item.id)).map((p) => ({ ...p, isNew: false }));
   const objectUrls = [];
@@ -101,6 +103,13 @@ export async function openItemForm({ project, drawing, item, onClose, onTradesCh
 
   // ----- Layout -----
   const saveBtn = el('button', { type: 'submit', class: 'btn btn-primary' }, 'Save');
+  // Pin button: list-only items can be placed on a drawing; pinned items can be moved.
+  // (Not shown for a brand-new pin that's being dropped right now.)
+  const pinned = !!item.drawingId;
+  const placeBtn = canPlace && (!isNew || !pinned)
+    ? el('button', { type: 'button', class: 'btn place-btn', onclick: placeOnDrawing },
+      pinned ? '📍 Move pin' : '📍 Place on a drawing')
+    : null;
   const field = (label, control) => el('label', { class: 'field' }, el('span', { class: 'field-label' }, label), control);
 
   const form = el('form', { class: 'pl-sheet', novalidate: true },
@@ -117,8 +126,10 @@ export async function openItemForm({ project, drawing, item, onClose, onTradesCh
       field('Location', locationInput),
       field('Description', descInput),
       el('div', { class: 'field' }, el('span', { class: 'field-label' }, 'Photos'), photoGrid),
-      el('p', { class: 'meta' }, drawing ? `Sheet: ${drawing.name}` : 'Not on a drawing (list only)',
-        isNew ? null : ` · Created ${new Date(item.createdAt).toLocaleDateString()}`),
+      el('div', { class: 'sheet-row' },
+        el('p', { class: 'meta' }, drawing ? `Sheet: ${drawing.name}` : 'Not on a drawing (list only)',
+          isNew ? null : ` · Created ${new Date(item.createdAt).toLocaleDateString()}`),
+        placeBtn),
       isNew ? null : el('button', { type: 'button', class: 'btn btn-danger', onclick: remove }, 'Delete item')));
 
   const backdrop = el('div', { class: 'pl-layer' }, form);
@@ -127,14 +138,30 @@ export async function openItemForm({ project, drawing, item, onClose, onTradesCh
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    const saved = await save();
+    if (saved) {
+      toast(`Item ${data.itemName(saved)} saved`);
+      close({ saved });
+    }
+  });
+
+  // Saves first (the item needs to exist), then hands off to the Drawing tab to pick the spot.
+  async function placeOnDrawing() {
+    const saved = await save();
+    if (saved) close({ saved, place: true });
+  }
+
+  // Validates and saves the form. Returns the saved item, or null if it couldn't be saved.
+  async function save() {
     const title = titleInput.value.trim();
     if (!title) {
       titleInput.classList.add('invalid');
       titleInput.focus();
       toast('Give the item a title.');
-      return;
+      return null;
     }
     saveBtn.disabled = true;
+    if (placeBtn) placeBtn.disabled = true;
     try {
       const saved = await data.saveItem({
         ...item,
@@ -145,8 +172,7 @@ export async function openItemForm({ project, drawing, item, onClose, onTradesCh
         location: locationInput.value.trim(),
         description: descInput.value.trim(),
       }, photos);
-      toast(`Item ${data.itemName(saved)} saved`);
-      close({ saved });
+      return saved;
     } catch (err) {
       console.error(err);
       if (/already used|start at 1/.test(err.message)) {
@@ -155,8 +181,10 @@ export async function openItemForm({ project, drawing, item, onClose, onTradesCh
       }
       toast(`Could not save: ${err.message}`, 3500);
       saveBtn.disabled = false;
+      if (placeBtn) placeBtn.disabled = false;
+      return null;
     }
-  });
+  }
 
   async function remove() {
     if (!window.confirm(`Delete item ${data.itemName(item)}? This can't be undone from the app.`)) return;

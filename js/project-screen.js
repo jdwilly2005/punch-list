@@ -86,7 +86,11 @@ export async function renderProject(app, projectId, initialTab, isStale) {
   const filterCount = el('span', {});
   const filterNote = el('div', { class: 'filter-note', hidden: true }, filterCount,
     el('button', { type: 'button', class: 'link-btn', onclick: clearFilters }, 'Clear filters'));
-  const drawingPane = el('div', { class: 'stage-wrap' }, stage, empty, fitBtn, hint, filterNote);
+  // Shown while placing an existing item on a drawing ("tap where it goes").
+  const placeText = el('span', {});
+  const placeHint = el('div', { class: 'place-hint', hidden: true }, placeText,
+    el('button', { type: 'button', class: 'btn btn-small', onclick: () => stopPlacing() }, 'Cancel'));
+  const drawingPane = el('div', { class: 'stage-wrap' }, stage, empty, fitBtn, hint, filterNote, placeHint);
 
   // ---------- List tab ----------
   const list = createListView({
@@ -129,14 +133,17 @@ export async function renderProject(app, projectId, initialTab, isStale) {
     drawingToolbar, list.toolbar, photos.toolbar, filterBar, drawingPane, list.body, photos.body);
 
   const view = new DrawingView(stage, {
-    onLongPress: newItemAt,
-    onEmptyTap: () => toast('Press and hold to drop a pin'),
+    onLongPress: (x, y) => (placing ? placeAt(x, y) : newItemAt(x, y)),
+    onEmptyTap: (x, y) => (placing ? placeAt(x, y) : toast('Press and hold to drop a pin')),
     onPinTap: openExisting,
+    onGroupTap: openGroup,
   });
+  let placing = null; // the item being placed / moved, if any
 
   // ---------- Tabs ----------
 
   function setTab(next) {
+    if (next !== 'drawing' && placing) stopPlacing();
     tab = next;
     for (const [key, btn] of Object.entries(tabBtns)) {
       btn.classList.toggle('active', key === tab);
@@ -169,7 +176,7 @@ export async function renderProject(app, projectId, initialTab, isStale) {
     const onSheet = itemsOnSheet();
     const shown = onSheet.filter((i) => matches(i, filter));
     view.setItems(shown);
-    hint.hidden = !current || onSheet.length > 0;
+    hint.hidden = !current || onSheet.length > 0 || !!placing;
     filterNote.hidden = !isFiltering(filter) || onSheet.length === 0;
     filterCount.textContent = `Showing ${shown.length} of ${onSheet.length} pins · `;
   }
@@ -310,6 +317,10 @@ export async function renderProject(app, projectId, initialTab, isStale) {
     view.clearPendingPin();
     await reloadData();
     refreshAll();
+    if (result && result.place) {
+      startPlacing(result.saved);
+      return;
+    }
     if (result && result.saved && !matches(result.saved, filter)) {
       toast(`Item ${data.itemName(result.saved)} saved, but it's hidden by your filters`, 3500);
     }
@@ -332,7 +343,74 @@ export async function renderProject(app, projectId, initialTab, isStale) {
       item: { projectId, drawingId: current.id, x, y, status: 'Open', trades: [] },
       onClose: afterForm,
       onTradesChanged: tradesChanged,
+      canPlace: drawings.length > 0,
     });
+  }
+
+  // ---------- Placing an existing item on a drawing ----------
+  // From the item form's "Place on a drawing" / "Move pin": go to the Drawing tab and
+  // put the item wherever the next tap lands (any sheet — switch with the sheet menu).
+
+  async function startPlacing(item) {
+    if (!drawings.length) {
+      toast('Add a drawing first (Drawing tab → Upload drawing)');
+      return;
+    }
+    placing = item;
+    const moving = !!item.drawingId;
+    drawingLoaded = true; // stop setTab from loading the last-viewed sheet instead
+    setTab('drawing');
+    const sheet = (moving && drawings.find((d) => d.id === item.drawingId)) || current || drawings[0];
+    if (!current || current.id !== sheet.id) await showDrawing(sheet.id);
+    placeText.textContent = `Tap the drawing where item ${data.itemName(item)} ${moving ? 'should move to' : 'goes'}.`
+      + (drawings.length > 1 ? ' Pick another sheet with the menu above.' : '');
+    placeHint.hidden = false;
+    hint.hidden = true;
+    stage.classList.add('placing');
+  }
+
+  function stopPlacing() {
+    placing = null;
+    placeHint.hidden = true;
+    stage.classList.remove('placing');
+    refreshPins();
+  }
+
+  async function placeAt(x, y) {
+    const item = placing;
+    stopPlacing();
+    try {
+      const updated = await data.updateItem(item.id, { drawingId: current.id, x, y });
+      await reloadData();
+      refreshAll();
+      if (matches(updated, filter)) {
+        view.flashPin(updated.id);
+        toast(`Item ${data.itemName(updated)} placed on ${current.name}`);
+      } else {
+        toast(`Item ${data.itemName(updated)} placed, but it's hidden by your filters`, 3500);
+      }
+    } catch (err) {
+      console.error(err);
+      toast(`Could not place the item: ${err.message}`);
+    }
+  }
+
+  // Tap on a gray "+N" pin: pick one of its items, or zoom in so they spread apart.
+  async function openGroup(ids) {
+    const group = ids.map((id) => items.find((i) => i.id === id)).filter(Boolean).sort(data.compareItems);
+    const choice = await choose({
+      title: `${group.length} pins here`,
+      choices: [
+        ...group.map((i) => ({
+          label: `${data.itemName(i)} · ${i.title}`,
+          note: [i.status, data.tradesText(i)].filter(Boolean).join(' · '),
+          value: i.id,
+        })),
+        { label: 'Zoom in here', value: '__zoom', note: 'Spread these pins apart' },
+      ],
+    });
+    if (choice === '__zoom') view.zoomToSeparate(group);
+    else if (choice) openExisting(choice);
   }
 
   // From the List tab's "+ Item": an item with no pin (it won't appear on any drawing).
@@ -343,6 +421,7 @@ export async function renderProject(app, projectId, initialTab, isStale) {
       item: { projectId, drawingId: null, x: null, y: null, status: 'Open', trades: [] },
       onClose: afterForm,
       onTradesChanged: tradesChanged,
+      canPlace: drawings.length > 0,
     });
   }
 
@@ -350,7 +429,7 @@ export async function renderProject(app, projectId, initialTab, isStale) {
     const item = items.find((i) => i.id === id);
     if (!item) return;
     const drawing = drawings.find((d) => d.id === item.drawingId) || null;
-    showForm({ project, drawing, item, onClose: afterForm, onTradesChanged: tradesChanged });
+    showForm({ project, drawing, item, onClose: afterForm, onTradesChanged: tradesChanged, canPlace: drawings.length > 0 });
   }
 
   // Drawing tab's PDF button: this sheet or every sheet, with the pins the filters show.
