@@ -47,7 +47,7 @@ export function openTradeManager({ projectId, onClose }) {
 
   async function renderList() {
     const [project, items] = await Promise.all([data.getProject(projectId), data.listItems(projectId)]);
-    const count = (name) => items.filter((i) => i.trade === name).length;
+    const count = (name) => items.filter((i) => (i.trades || []).includes(name)).length;
     listEl.replaceChildren(...(project.trades.length
       ? project.trades.map((t) => el('div', { class: 'trade-row' },
         el('div', { class: 'trade-name' }, t, el('small', {}, plural(count(t), 'item'))),
@@ -72,7 +72,7 @@ export function openTradeManager({ projectId, onClose }) {
 
   async function remove(name, inUse) {
     const msg = inUse
-      ? `Delete "${name}"? ${plural(inUse, 'item')} assigned to it will be set to "No trade".`
+      ? `Delete "${name}"? It will be removed from the ${plural(inUse, 'item')} it's assigned to.`
       : `Delete "${name}"?`;
     if (!window.confirm(msg)) return;
     await data.deleteTrade(projectId, name);

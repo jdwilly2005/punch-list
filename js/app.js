@@ -7,7 +7,7 @@
 //   #/p/<id>/photos -> a project, Photos tab
 
 import * as data from './db.js';
-import { el, toast, brandLink, APP_VERSION } from './ui.js';
+import { el, toast, brandLink, choose, APP_VERSION } from './ui.js';
 import { renderProject } from './project-screen.js';
 
 const app = document.getElementById('app');
@@ -52,17 +52,79 @@ async function renderHome(token) {
   });
 
   const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
-  const list = projects.length
-    ? el('div', { class: 'project-list' }, projects.map((p, i) => el('a', { class: 'card', href: `#/p/${p.id}` },
+  const card = (p, i) => el('div', { class: `card project-card${p.archivedAt ? ' archived' : ''}` },
+    el('a', { class: 'card-link', href: `#/p/${p.id}` },
       el('div', { class: 'card-title' }, p.name),
       el('div', { class: 'card-meta' },
-        `${plural(summaries[i].sheets, 'sheet')} · ${plural(summaries[i].items, 'item')} · ${summaries[i].notClosed} not closed`))))
-    : el('p', { class: 'empty' }, 'No projects yet. Create one above to get started.');
+        `${plural(summaries[i].sheets, 'sheet')} · ${plural(summaries[i].items, 'item')} · ${summaries[i].notClosed} not closed`)),
+    el('button', {
+      type: 'button', class: 'card-menu', 'aria-label': `Options for ${p.name}`,
+      onclick: () => projectMenu(p, summaries[i]),
+    }, '⋯'));
+
+  const active = [];
+  const archived = [];
+  projects.forEach((p, i) => (p.archivedAt ? archived : active).push(card(p, i)));
+  const list = active.length
+    ? el('div', { class: 'project-list' }, active)
+    : el('p', { class: 'empty' }, archived.length
+      ? 'No active projects. Create one above, or open the archive below.'
+      : 'No projects yet. Create one above to get started.');
+  const archive = archived.length
+    ? el('details', { class: 'archive' },
+      el('summary', {}, `Archived projects (${archived.length})`),
+      el('div', { class: 'project-list' }, archived))
+    : null;
 
   app.replaceChildren(
     el('header', { class: 'topbar' }, brandLink({ showName: true })),
-    el('main', { class: 'scroll' }, el('h2', { class: 'section-title' }, 'Projects'), form, list,
+    el('main', { class: 'scroll' }, el('h2', { class: 'section-title' }, 'Projects'), form, list, archive,
       el('p', { class: 'app-version' }, `Version ${APP_VERSION}`)));
+}
+
+// A project's ⋯ menu: rename, archive / un-archive, delete.
+async function projectMenu(project, summary) {
+  const action = await choose({
+    title: project.name,
+    choices: [
+      { label: 'Rename', value: 'rename' },
+      project.archivedAt
+        ? { label: 'Move back to active projects', value: 'unarchive' }
+        : { label: 'Archive', value: 'archive', note: 'Hides it from the main list; nothing is deleted' },
+      { label: 'Delete project…', value: 'delete', kind: 'danger' },
+    ],
+  });
+  if (action === 'rename') {
+    const name = (window.prompt('Project name', project.name) || '').trim();
+    if (!name || name === project.name) return;
+    await data.updateProject(project.id, { name });
+  } else if (action === 'archive' || action === 'unarchive') {
+    await data.setProjectArchived(project.id, action === 'archive');
+    toast(action === 'archive' ? `"${project.name}" archived` : `"${project.name}" moved back to active`);
+  } else if (action === 'delete') {
+    const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+    const ok = await choose({
+      title: `Delete "${project.name}"?`,
+      message: `This permanently removes its ${plural(summary.sheets, 'sheet')}, ${plural(summary.items, 'item')}, `
+        + 'and all their photos from this device. It can\'t be undone.',
+      choices: [
+        { label: 'Delete project', value: 'delete', kind: 'danger' },
+        project.archivedAt ? null : { label: 'Archive it instead', value: 'archive' },
+      ].filter(Boolean),
+    });
+    if (ok === 'archive') {
+      await data.setProjectArchived(project.id, true);
+      toast(`"${project.name}" archived`);
+    } else if (ok === 'delete') {
+      await data.deleteProject(project.id);
+      toast(`"${project.name}" deleted`);
+    } else {
+      return;
+    }
+  } else {
+    return;
+  }
+  route(); // redraw the Projects screen
 }
 
 // ---------- Start up ----------

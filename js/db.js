@@ -22,6 +22,12 @@ db.version(1).stores({
   items: 'id, projectId, drawingId, updatedAt',
   photos: 'id, itemId, projectId, updatedAt',
 });
+// v2: an item can have several trades. `trade: 'ABC'` becomes `trades: ['ABC']`.
+// (Dexie runs this once on each device the first time the new app version opens.)
+db.version(2).stores({}).upgrade((tx) => tx.table('items').toCollection().modify((item) => {
+  item.trades = Array.isArray(item.trades) ? item.trades : (item.trade ? [item.trade] : []);
+  delete item.trade;
+}));
 
 export const STATUSES = ['Open', 'In Progress', 'Ready for Review', 'Closed'];
 
@@ -39,6 +45,10 @@ export function newId() {
 }
 
 const now = () => new Date().toISOString();
+
+// Deleted records stay as small "tombstones" (for syncing later), but their big
+// files are cleared so deleting really frees up space on the phone.
+const BLOBS_GONE = { originalBlob: null, annotatedBlob: null };
 const alive = (r) => r && !r.deletedAt;
 
 function newRecord(fields) {
@@ -73,6 +83,24 @@ export async function updateProject(id, changes) {
   await db.projects.update(id, { ...changes, updatedAt: now() });
 }
 
+// Archived projects move to the "Archived" section of the Projects screen; nothing is removed.
+export async function setProjectArchived(id, archived) {
+  await updateProject(id, { archivedAt: archived ? now() : null });
+}
+
+// Removes a project and everything in it (sheets, items, photos) from this device.
+export async function deleteProject(id) {
+  const t = now();
+  const gone = { deletedAt: t, updatedAt: t };
+  await db.transaction('rw', [db.projects, db.files, db.drawings, db.items, db.photos], async () => {
+    await db.projects.update(id, gone);
+    await db.drawings.where('projectId').equals(id).modify(gone);
+    await db.items.where('projectId').equals(id).modify(gone);
+    await db.files.where('projectId').equals(id).modify({ ...gone, blob: null });
+    await db.photos.where('projectId').equals(id).modify({ ...gone, ...BLOBS_GONE });
+  });
+}
+
 // ---------- Trades (a list of names stored on the project) ----------
 
 const byName = (a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true });
@@ -91,21 +119,32 @@ export async function renameTrade(projectId, oldName, newName) {
     const trades = [...new Set(p.trades.map((x) => (x === oldName ? newName : x)))].sort(byName);
     await db.projects.update(projectId, { trades, updatedAt: t });
     await db.items.where('projectId').equals(projectId)
-      .filter((i) => i.trade === oldName)
-      .modify({ trade: newName, updatedAt: t });
+      .filter((i) => (i.trades || []).includes(oldName))
+      .modify((i) => {
+        i.trades = [...new Set(i.trades.map((x) => (x === oldName ? newName : x)))];
+        i.updatedAt = t;
+      });
   });
 }
 
-// Removes the trade from the project; items that used it become "no trade".
+// Removes the trade from the project and from every item that had it.
 export async function deleteTrade(projectId, name) {
   await db.transaction('rw', db.projects, db.items, async () => {
     const t = now();
     const p = await db.projects.get(projectId);
     await db.projects.update(projectId, { trades: p.trades.filter((x) => x !== name), updatedAt: t });
     await db.items.where('projectId').equals(projectId)
-      .filter((i) => i.trade === name)
-      .modify({ trade: '', updatedAt: t });
+      .filter((i) => (i.trades || []).includes(name))
+      .modify((i) => {
+        i.trades = i.trades.filter((x) => x !== name);
+        i.updatedAt = t;
+      });
   });
+}
+
+// "ABC Drywall, Sparky Electric" (or '' for none).
+export function tradesText(item) {
+  return (item.trades || []).join(', ');
 }
 
 export async function projectSummary(projectId) {
@@ -155,6 +194,29 @@ export async function addDrawings(projectId, file, kind, pages) {
 
 export async function updateDrawing(id, changes) {
   await db.drawings.update(id, { ...changes, updatedAt: now() });
+}
+
+// Deletes one sheet. Its pinned items are either kept as "list only" items
+// (keepItems = true: they lose their pin) or deleted along with their photos.
+// The uploaded file itself is cleared once none of its pages are left.
+export async function deleteDrawing(id, { keepItems }) {
+  const t = now();
+  const gone = { deletedAt: t, updatedAt: t };
+  await db.transaction('rw', [db.files, db.drawings, db.items, db.photos], async () => {
+    const drawing = await db.drawings.get(id);
+    await db.drawings.update(id, gone);
+    const pinned = db.items.where('drawingId').equals(id).filter(alive);
+    if (keepItems) {
+      await pinned.modify({ drawingId: null, x: null, y: null, updatedAt: t });
+    } else {
+      const ids = (await pinned.toArray()).map((i) => i.id);
+      await db.items.where('id').anyOf(ids).modify(gone);
+      await db.photos.where('itemId').anyOf(ids).modify({ ...gone, ...BLOBS_GONE });
+    }
+    const pagesLeft = await db.drawings.where('projectId').equals(drawing.projectId)
+      .filter((d) => alive(d) && d.fileId === drawing.fileId).count();
+    if (!pagesLeft) await db.files.update(drawing.fileId, { ...gone, blob: null });
+  });
 }
 
 export async function getFileBlob(fileId) {
@@ -246,14 +308,14 @@ export async function saveItem(itemData, photos = []) {
       const existing = await db.items.get(itemData.id);
       item = { ...existing, ...itemData, updatedAt: t };
     } else {
-      item = newRecord({ drawingId: null, x: null, y: null, ...itemData, createdBy: CURRENT_USER });
+      item = newRecord({ drawingId: null, x: null, y: null, trades: [], ...itemData, createdBy: CURRENT_USER });
     }
     Object.assign(item, resolveNumber(item, others));
     await db.items.put(item);
 
     for (const ph of photos) {
       if (ph.removed) {
-        if (!ph.isNew) await db.photos.update(ph.id, { deletedAt: t, updatedAt: t });
+        if (!ph.isNew) await db.photos.update(ph.id, { deletedAt: t, updatedAt: t, ...BLOBS_GONE });
       } else if (ph.isNew) {
         await db.photos.add({
           id: ph.id,
@@ -292,7 +354,7 @@ export async function deleteItem(id) {
   const t = now();
   await db.transaction('rw', db.items, db.photos, async () => {
     await db.items.update(id, { deletedAt: t, updatedAt: t });
-    await db.photos.where('itemId').equals(id).modify({ deletedAt: t, updatedAt: t });
+    await db.photos.where('itemId').equals(id).modify({ deletedAt: t, updatedAt: t, ...BLOBS_GONE });
   });
 }
 

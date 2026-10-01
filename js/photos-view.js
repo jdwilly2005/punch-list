@@ -6,7 +6,7 @@
 // Procore's page usually doesn't work (browsers pass a link, not the file).
 
 import * as data from './db.js';
-import { itemRef, itemName, compareItems } from './db.js';
+import { itemRef, itemName, compareItems, tradesText } from './db.js';
 import { el, toast, statusKey } from './ui.js';
 import { matches } from './filters.js';
 import { downloadBlob, loadVendorScript } from './export.js';
@@ -125,7 +125,7 @@ export function createPhotosView({ ctx, onOpenItem }) {
         }, itemRef(item)),
         el('div', { class: 'photo-item-title' },
           el('strong', {}, item.title),
-          el('small', {}, [item.status, item.trade, item.location].filter(Boolean).join(' · '))),
+          el('small', {}, [item.status, tradesText(item), item.location].filter(Boolean).join(' · '))),
         el('div', { class: 'photo-item-actions' }, buttons)),
       el('div', { class: 'photo-strip' }, thumbs));
   }

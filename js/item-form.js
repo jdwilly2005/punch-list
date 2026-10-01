@@ -3,15 +3,13 @@
 import * as data from './db.js';
 import { el, toast, statusKey } from './ui.js';
 import { preparePhoto, openMarkup } from './photo-markup.js';
-import { openTradeManager, resolveTrade } from './trades.js';
-
-const ADD_TRADE = '__add__';
-const MANAGE_TRADES = '__manage__';
+import { createTradeChips } from './trade-picker.js';
 
 // item: an existing punch item, or for a new one { projectId, drawingId, x, y }
 // (drawingId/x/y null = a list-only item with no pin). drawing: its sheet, or null.
 // onClose(result) is called with { saved } / { deleted } / null (cancelled).
-export async function openItemForm({ project, drawing, item, onClose }) {
+// onTradesChanged(): the project's trade list was changed from inside the form.
+export async function openItemForm({ project, drawing, item, onClose, onTradesChanged = () => {} }) {
   const isNew = !item.id;
   const photos = isNew ? [] : (await data.listPhotos(item.id)).map((p) => ({ ...p, isNew: false }));
   const objectUrls = [];
@@ -36,45 +34,8 @@ export async function openItemForm({ project, drawing, item, onClose }) {
       el('input', { type: 'radio', name: 'status', value: s, checked: (item.status || 'Open') === s }),
       el('span', {}, s))));
 
-  const tradeSelect = el('select', {});
-  let lastTrade = item.trade || '';
-  function fillTrades() {
-    const trades = [...project.trades];
-    if (lastTrade && !trades.includes(lastTrade)) trades.push(lastTrade);
-    tradeSelect.replaceChildren(
-      el('option', { value: '' }, '— Select trade —'),
-      ...trades.map((t) => el('option', { value: t }, t)),
-      el('option', { value: ADD_TRADE }, '＋ Add a trade…'),
-      el('option', { value: MANAGE_TRADES }, '⚙︎ Manage trades…'));
-    tradeSelect.value = lastTrade;
-  }
-  fillTrades();
-  tradeSelect.addEventListener('change', async () => {
-    const choice = tradeSelect.value;
-    if (choice !== ADD_TRADE && choice !== MANAGE_TRADES) {
-      lastTrade = choice;
-      return;
-    }
-    fillTrades(); // put the dropdown back while the prompt / manager is open
-    if (choice === MANAGE_TRADES) {
-      openTradeManager({
-        projectId: project.id,
-        onClose: async (result) => {
-          project.trades = (await data.getProject(project.id)).trades;
-          lastTrade = resolveTrade(lastTrade, result);
-          fillTrades();
-        },
-      });
-      return;
-    }
-    const name = (window.prompt('New trade / subcontractor name') || '').trim();
-    if (!name) return;
-    await data.addTrade(project.id, name);
-    project.trades = (await data.getProject(project.id)).trades;
-    // If it already existed with different capitals, use the existing spelling.
-    lastTrade = project.trades.find((t) => t.toLowerCase() === name.toLowerCase()) || name;
-    fillTrades();
-  });
+  // Tap one or more trades / subs. (Adding or managing trades here updates the project's list.)
+  const tradeChips = createTradeChips({ project, selected: item.trades || [], onTradesChanged });
 
   const locationInput = el('input', {
     type: 'text', value: item.location || '', maxlength: '120', autocomplete: 'off',
@@ -152,7 +113,7 @@ export async function openItemForm({ project, drawing, item, onClose }) {
       el('label', { class: 'field' }, el('span', { class: 'field-label' }, 'Number / tag'), tagInput,
         el('small', { class: 'field-hint' }, 'Leave blank to number automatically, or type your own tag (e.g. CB-12).')),
       el('div', { class: 'field' }, el('span', { class: 'field-label' }, 'Status'), statusSeg),
-      field('Responsible sub / trade', tradeSelect),
+      el('div', { class: 'field' }, el('span', { class: 'field-label' }, 'Responsible trades / subs'), tradeChips.node),
       field('Location', locationInput),
       field('Description', descInput),
       el('div', { class: 'field' }, el('span', { class: 'field-label' }, 'Photos'), photoGrid),
@@ -180,7 +141,7 @@ export async function openItemForm({ project, drawing, item, onClose }) {
         title,
         tag: tagInput.value.trim(),
         status: form.querySelector('input[name=status]:checked').value,
-        trade: lastTrade,
+        trades: tradeChips.selected,
         location: locationInput.value.trim(),
         description: descInput.value.trim(),
       }, photos);

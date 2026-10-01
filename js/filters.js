@@ -3,6 +3,7 @@
 // A filter looks like: { statuses: ['Open', 'In Progress', ...], trade: '' }
 //   statuses: the statuses to show (all four = no status filter)
 //   trade:    '' = all trades, NO_TRADE = items with no trade picked, else a trade name
+//             (an item with several trades matches each of them)
 
 import { STATUSES } from './db.js';
 
@@ -18,8 +19,9 @@ export function matchesStatus(item, filter) {
 
 export function matchesTrade(item, filter) {
   if (!filter.trade) return true;
-  if (filter.trade === NO_TRADE) return !item.trade;
-  return item.trade === filter.trade;
+  const trades = item.trades || [];
+  if (filter.trade === NO_TRADE) return trades.length === 0;
+  return trades.includes(filter.trade);
 }
 
 export function matches(item, filter) {

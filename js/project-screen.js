@@ -5,7 +5,7 @@
 // Any change on either tab updates the other, because both read the same `items`.
 
 import * as data from './db.js';
-import { el, toast, busy, statusKey, brandLink } from './ui.js';
+import { el, toast, busy, statusKey, brandLink, choose } from './ui.js';
 import { readPdfPages, readImageSize } from './sheet-render.js';
 import { DrawingView } from './drawing-view.js';
 import { openItemForm } from './item-form.js';
@@ -69,12 +69,12 @@ export async function renderProject(app, projectId, initialTab, isStale) {
     fileInput.value = '';
     if (file) importFile(file);
   });
-  const renameBtn = el('button', { type: 'button', class: 'btn', onclick: renameSheet }, 'Rename');
+  const editBtn = el('button', { type: 'button', class: 'btn', onclick: editSheet }, 'Edit');
   const addBtn = el('button', { type: 'button', class: 'btn', onclick: () => fileInput.click() }, '+ Sheet');
   const pdfBtn = el('button', {
     type: 'button', class: 'btn', title: 'Save the drawings with pins as a PDF', onclick: exportPdf,
   }, 'PDF');
-  const drawingToolbar = el('div', { class: 'toolbar' }, sheetSelect, renameBtn, addBtn, pdfBtn, fileInput);
+  const drawingToolbar = el('div', { class: 'toolbar' }, sheetSelect, editBtn, addBtn, pdfBtn, fileInput);
 
   const stage = el('div', { class: 'stage' });
   const empty = el('div', { class: 'stage-empty' },
@@ -100,6 +100,7 @@ export async function renderProject(app, projectId, initialTab, isStale) {
       refreshFilterBar();
     },
     onClearFilters: clearFilters,
+    onTradesChanged: tradesChanged,
   });
   list.onFiltersChanged = refreshFilterBar;
 
@@ -160,7 +161,7 @@ export async function renderProject(app, projectId, initialTab, isStale) {
     sheetSelect.replaceChildren(...drawings.map((d) => el('option', { value: d.id }, d.name)));
     const has = drawings.length > 0;
     empty.hidden = has;
-    sheetSelect.hidden = renameBtn.hidden = pdfBtn.hidden = fitBtn.hidden = !has;
+    sheetSelect.hidden = editBtn.hidden = pdfBtn.hidden = fitBtn.hidden = !has;
     if (current) sheetSelect.value = current.id;
   }
 
@@ -210,6 +211,62 @@ export async function renderProject(app, projectId, initialTab, isStale) {
     } finally {
       done();
     }
+  }
+
+  // Edit menu for the sheet on screen: rename or delete it.
+  async function editSheet() {
+    if (!current) return;
+    const action = await choose({
+      title: current.name,
+      choices: [
+        { label: 'Rename sheet', value: 'rename' },
+        { label: 'Delete sheet…', value: 'delete', kind: 'danger' },
+      ],
+    });
+    if (action === 'rename') renameSheet();
+    if (action === 'delete') deleteSheet();
+  }
+
+  async function deleteSheet() {
+    const sheet = current;
+    const pinned = items.filter((i) => i.drawingId === sheet.id);
+    const n = pinned.length;
+    const plural = `${n} item${n === 1 ? '' : 's'}`;
+    let keepItems = false;
+    if (n) {
+      const answer = await choose({
+        title: `Delete "${sheet.name}"?`,
+        message: `This sheet has ${plural} pinned on it. What should happen to ${n === 1 ? 'it' : 'them'}?`,
+        choices: [
+          { label: `Keep the ${plural}`, value: 'keep', kind: 'primary', note: 'They stay in the List tab and exports, without a pin' },
+          { label: `Delete the ${plural} too`, value: 'delete', kind: 'danger', note: 'Their photos are deleted as well' },
+        ],
+      });
+      if (!answer) return;
+      keepItems = answer === 'keep';
+    } else {
+      const ok = await choose({
+        title: `Delete "${sheet.name}"?`,
+        message: 'No items are pinned on this sheet.',
+        choices: [{ label: 'Delete sheet', value: true, kind: 'danger' }],
+      });
+      if (!ok) return;
+    }
+    await data.deleteDrawing(sheet.id, { keepItems });
+    drawings = await data.listDrawings(projectId);
+    await reloadData();
+    current = null;
+    refreshSheets();
+    if (drawings.length) {
+      const next = drawings.find((d) => d.sortOrder > sheet.sortOrder) || drawings[drawings.length - 1];
+      await showDrawing(next.id);
+    } else {
+      view.clearSheet();
+      refreshPins();
+    }
+    refreshFilterBar();
+    if (tab === 'list') list.render();
+    toast(n ? `Sheet deleted · ${plural} ${keepItems ? 'kept as list-only' : 'deleted'}` : 'Sheet deleted');
   }
 
   async function renameSheet() {
@@ -272,8 +329,9 @@ export async function renderProject(app, projectId, initialTab, isStale) {
     showForm({
       project,
       drawing: current,
-      item: { projectId, drawingId: current.id, x, y, status: 'Open', trade: '' },
+      item: { projectId, drawingId: current.id, x, y, status: 'Open', trades: [] },
       onClose: afterForm,
+      onTradesChanged: tradesChanged,
     });
   }
 
@@ -282,8 +340,9 @@ export async function renderProject(app, projectId, initialTab, isStale) {
     showForm({
       project,
       drawing: null,
-      item: { projectId, drawingId: null, x: null, y: null, status: 'Open', trade: '' },
+      item: { projectId, drawingId: null, x: null, y: null, status: 'Open', trades: [] },
       onClose: afterForm,
+      onTradesChanged: tradesChanged,
     });
   }
 
@@ -291,7 +350,7 @@ export async function renderProject(app, projectId, initialTab, isStale) {
     const item = items.find((i) => i.id === id);
     if (!item) return;
     const drawing = drawings.find((d) => d.id === item.drawingId) || null;
-    showForm({ project, drawing, item, onClose: afterForm });
+    showForm({ project, drawing, item, onClose: afterForm, onTradesChanged: tradesChanged });
   }
 
   // Drawing tab's PDF button: this sheet or every sheet, with the pins the filters show.
@@ -307,18 +366,25 @@ export async function renderProject(app, projectId, initialTab, isStale) {
 
   // ---------- Filters ----------
 
+  // A trade was added / renamed / deleted from a form or the List tab's picker.
+  async function tradesChanged() {
+    await reloadData();
+    refreshFilterBar();
+    if (tab === 'list') list.render();
+  }
+
   function refreshFilterBar() {
     filterBar.hidden = tab === 'drawing' && drawings.length === 0;
     // Counts follow what's in view: this sheet on the Drawing tab; search/sheet choice on the List tab.
     const scope = { drawing: itemsOnSheet, list: list.scopeItems, photos: () => items }[tab]();
     const count = (test) => scope.filter(test).length;
 
-    const trades = [...new Set([...project.trades, ...items.map((i) => i.trade).filter(Boolean)])];
+    const trades = [...new Set([...project.trades, ...items.flatMap((i) => i.trades || [])])];
     if (filter.trade && filter.trade !== NO_TRADE && !trades.includes(filter.trade)) trades.push(filter.trade);
     tradeFilter.replaceChildren(
       el('option', { value: '' }, 'All trades'),
-      ...trades.map((t) => el('option', { value: t }, `${t} (${count((i) => i.trade === t)})`)),
-      el('option', { value: NO_TRADE }, `No trade set (${count((i) => !i.trade)})`),
+      ...trades.map((t) => el('option', { value: t }, `${t} (${count((i) => (i.trades || []).includes(t))})`)),
+      el('option', { value: NO_TRADE }, `No trade set (${count((i) => !(i.trades || []).length)})`),
       el('option', { value: MANAGE_TRADES }, '⚙︎ Manage trades…'));
     tradeFilter.value = filter.trade;
     tradeFilter.classList.toggle('active', !!filter.trade);

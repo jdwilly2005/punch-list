@@ -3,14 +3,14 @@
 // Columns are defined once in COLUMNS; add or reorder columns there and both
 // formats follow. (A future "Procore import" format can reuse this file.)
 
-import { STATUSES, itemRef } from './db.js';
+import { STATUSES, itemRef, tradesText } from './db.js';
 import { STATUS_COLORS } from './ui.js';
 
 const COLUMNS = [
   { header: '#', width: 8, value: (i) => (i.tag ? i.tag : i.number) }, // tag stays text, numbers stay numbers
   { header: 'Title', width: 34, value: (i) => i.title },
   { header: 'Status', width: 18, value: (i) => i.status },
-  { header: 'Trade / Sub', width: 22, value: (i) => i.trade || '' },
+  { header: 'Trades / Subs', width: 26, value: (i) => tradesText(i), wrap: true },
   { header: 'Location', width: 24, value: (i) => i.location || '' },
   { header: 'Description', width: 50, value: (i) => i.description || '', wrap: true },
   { header: 'Sheet', width: 26, value: (i, sheetName) => sheetName(i) },
@@ -127,10 +127,14 @@ export async function toXlsx(items, drawings, project, filterText) {
   sum.addRow([`Included: ${filterText}`]);
   sum.addRow([]);
   styleHeader(sum.addRow(['Trade / Sub', ...STATUSES, 'Total']));
-  const trades = [...new Set(items.map((i) => i.trade || ''))]
+  // An item with several trades is counted under each of them; the Total row counts it once.
+  const trades = [...new Set(items.flatMap((i) => (i.trades && i.trades.length ? i.trades : [''])))]
     .sort((a, b) => (a === '') - (b === '') || a.localeCompare(b));
+  if (items.some((i) => (i.trades || []).length > 1)) {
+    sum.getRow(3).getCell(1).value += ' (items with several trades are counted under each)';
+  }
   for (const t of trades) {
-    const mine = items.filter((i) => (i.trade || '') === t);
+    const mine = items.filter((i) => (t ? (i.trades || []).includes(t) : !(i.trades || []).length));
     sum.addRow([t || '(No trade set)', ...STATUSES.map((s) => mine.filter((i) => i.status === s).length), mine.length]);
   }
   const totals = sum.addRow(['Total', ...STATUSES.map((s) => items.filter((i) => i.status === s).length), items.length]);
@@ -171,9 +175,12 @@ export async function toProcoreXlsx(items, drawings) {
     put('Item Name', item.title);
     put('Punch Item Number', item.tag || item.number);
     put('Location', item.location || '');
-    put('Trade', item.trade || '');
+    // Procore takes one trade per item: the first goes in Trade, the rest are noted in the description.
+    const trades = item.trades || [];
+    put('Trade', trades[0] || '');
     if (item.drawingId) put('Reference', `${sheetName(item)} – pin ${itemRef(item)}`);
-    put('Description', item.description || '');
+    put('Description', [item.description || '', trades.length > 1 ? `Trades: ${trades.join(', ')}` : '']
+      .filter(Boolean).join('\n\n'));
     row.commit();
   });
 

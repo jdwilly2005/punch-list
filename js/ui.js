@@ -24,7 +24,7 @@ export function el(tag, props = {}, ...children) {
 // App-icon files for the home screen are separate: icons/ and manifest.json.
 // Shown on the Projects screen so you can tell which version a device is running.
 // Must match VERSION in sw.js — bump both on every publish.
-export const APP_VERSION = 'v13';
+export const APP_VERSION = 'v14';
 
 export const BRAND = {
   name: 'Punch List',
@@ -79,4 +79,29 @@ export function busy(message) {
     el('div', { class: 'pl-working-box' }, el('div', { class: 'spinner' }), message));
   document.body.append(overlay);
   return () => overlay.remove();
+}
+
+// A small pop-up with a few choices; resolves with the chosen value, or null if cancelled.
+//   choices: [{ label, value, kind: 'primary' | 'danger' | undefined, note }]
+// Used for "are you sure?" questions and short menus (e.g. a project's ⋯ menu).
+export function choose({ title, message = '', choices }) {
+  return new Promise((resolve) => {
+    const layer = el('div', { class: 'pl-layer' },
+      el('div', { class: 'pl-sheet pl-choose', role: 'dialog', 'aria-label': title },
+        el('div', { class: 'pl-sheet-body' },
+          el('h2', { class: 'choose-title' }, title),
+          message ? el('p', { class: 'choose-message' }, message) : null,
+          ...choices.map((c) => el('button', {
+            type: 'button',
+            class: `btn choose-btn${c.kind ? ` btn-${c.kind}` : ''}`,
+            onclick: () => done(c.value),
+          }, el('span', {}, c.label), c.note ? el('small', {}, c.note) : null)),
+          el('button', { type: 'button', class: 'btn btn-ghost choose-btn', onclick: () => done(null) }, 'Cancel'))));
+    layer.addEventListener('click', (e) => { if (e.target === layer) done(null); }); // tap outside = cancel
+    document.body.append(layer);
+    function done(value) {
+      layer.remove();
+      resolve(value);
+    }
+  });
 }

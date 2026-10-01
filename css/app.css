@@ -103,6 +103,19 @@ input.invalid { border-color: var(--danger); }
 }
 .card-title { font-weight: 600; font-size: 17px; }
 .card-meta { color: var(--muted); font-size: 14px; margin-top: 4px; }
+.project-card { display: flex; align-items: stretch; padding: 0; }
+.card-link { flex: 1; min-width: 0; padding: 14px 16px; color: inherit; text-decoration: none; }
+.card-menu {
+  flex: 0 0 auto; width: 52px; border: none; border-left: 1px solid var(--border); background: none;
+  font: inherit; font-size: 22px; font-weight: 700; color: var(--muted); cursor: pointer; border-radius: 0 12px 12px 0;
+}
+.project-card.archived { opacity: .75; }
+.archive { margin-top: 24px; }
+.archive > summary {
+  cursor: pointer; padding: 10px 2px; font-size: 14px; font-weight: 600; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .06em;
+}
+.archive .project-list { margin-top: 8px; }
 .empty { color: var(--muted); text-align: center; margin-top: 40px; }
 .app-version { color: var(--muted); font-size: 12px; text-align: center; margin: 32px 0 0; opacity: .8; }
 
@@ -319,6 +332,31 @@ input.invalid { border-color: var(--danger); }
 .check-row { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 14px; cursor: pointer; }
 .check-row input { width: 22px; height: 22px; flex: 0 0 auto; accent-color: var(--accent); }
 .no-pin { font-size: 13px; padding: 0 6px; }
+
+/* ---------- Trade chips (trade-picker.js) ---------- */
+.trade-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.trade-chip {
+  font: inherit; font-size: 14px; font-weight: 600; min-height: 40px; padding: 6px 14px;
+  border-radius: 20px; border: 1.5px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer;
+}
+.trade-chip[aria-pressed=true] { background: var(--header); border-color: var(--header); color: #fff; }
+.trade-chip[aria-pressed=true]::before { content: '✓ '; }
+.trade-chip-tool { border-style: dashed; color: var(--muted); font-weight: 500; }
+.trade-cell {
+  all: unset; box-sizing: border-box; display: block; width: 100%; min-height: 40px; padding: 10px 8px;
+  cursor: pointer; border: 1px solid transparent; border-radius: 8px; font-size: 15px; line-height: 1.3;
+}
+.trade-cell:hover { border-color: var(--border); }
+.trade-cell.empty-cell { color: #b0b7c1; }
+
+/* ---------- Choice pop-up (ui.js choose) ---------- */
+.pl-choose { max-width: 440px; }
+.pl-choose .pl-sheet-body { gap: 10px; }
+.choose-title { margin: 0; font-size: 18px; text-align: center; }
+.choose-message { margin: 0 0 6px; color: var(--muted); font-size: 15px; text-align: center; line-height: 1.4; }
+.choose-btn { width: 100%; min-height: 48px; flex-direction: column; gap: 2px; }
+.choose-btn small { font-size: 12px; font-weight: 400; opacity: .85; }
+.btn-danger.choose-btn { background: var(--danger); color: #fff; font-weight: 600; }
 .export-choice small { font-weight: 400; opacity: .85; font-size: 13px; }
 .toolbar input[type=search] { flex: 1 1 auto; min-width: 0; }
 @media (max-width: 479px) {

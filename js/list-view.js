@@ -5,7 +5,8 @@
 
 import * as data from './db.js';
 import { el, toast, statusKey } from './ui.js';
-import { itemRef, itemName, compareItems } from './db.js';
+import { itemRef, itemName, compareItems, tradesText } from './db.js';
+import { openTradePicker } from './trade-picker.js';
 import { matches, isFiltering, describeFilter } from './filters.js';
 import {
   toCsv, toXlsx, toProcoreXlsx, exportFileName, downloadBlob,
@@ -16,7 +17,7 @@ const COLUMNS = [
   { key: 'number', label: '#' },
   { key: 'title', label: 'Title' },
   { key: 'status', label: 'Status' },
-  { key: 'trade', label: 'Trade / Sub' },
+  { key: 'trade', label: 'Trades / Subs' },
   { key: 'location', label: 'Location' },
   { key: 'description', label: 'Description' },
   { key: 'sheet', label: 'Sheet' },
@@ -55,7 +56,9 @@ function saveSort(sort) {
 const shortDate = (iso) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
 // ctx() returns the project screen's current { project, items, drawings, filter }.
-export function createListView({ ctx, onOpenItem, onNewItem, onShowOnDrawing, onItemSaved, onClearFilters }) {
+export function createListView({
+  ctx, onOpenItem, onNewItem, onShowOnDrawing, onItemSaved, onClearFilters, onTradesChanged,
+}) {
   let sort = loadSort();
   let search = '';
   let sheetId = '';
@@ -89,7 +92,7 @@ export function createListView({ ctx, onOpenItem, onNewItem, onShowOnDrawing, on
 
   function matchesSearch(item) {
     if (!search) return true;
-    return [itemRef(item), item.title, item.description, item.location, item.trade]
+    return [itemRef(item), item.title, item.description, item.location, tradesText(item)]
       .join(' ').toLowerCase().includes(search);
   }
 
@@ -108,6 +111,7 @@ export function createListView({ ctx, onOpenItem, onNewItem, onShowOnDrawing, on
     const value = (item) => {
       switch (sort.key) {
         case 'status': return data.STATUSES.indexOf(item.status);
+        case 'trade': return tradesText(item).toLowerCase();
         case 'sheet': return drawingsById[item.drawingId] ? drawingsById[item.drawingId].sortOrder : Infinity;
         default: return (item[sort.key] || '').toString().toLowerCase();
       }
@@ -158,7 +162,7 @@ export function createListView({ ctx, onOpenItem, onNewItem, onShowOnDrawing, on
         c.label, active ? el('span', { class: 'sort-arrow' }, sort.dir === 'asc' ? '▲' : '▼') : null));
     }));
 
-    const rows = shown.map((item) => makeRow(item, drawingsById, project.trades));
+    const rows = shown.map((item) => makeRow(item, drawingsById, project));
     if (!items.length) {
       rows.push(el('tr', {}, el('td', { class: 'table-empty', colspan: String(COLUMNS.length) },
         'No punch items yet. Long-press on a drawing to add one, or tap + Item.')));
@@ -295,7 +299,7 @@ export function createListView({ ctx, onOpenItem, onNewItem, onShowOnDrawing, on
 
   // ----- One row -----
 
-  function makeRow(item, drawingsById, trades) {
+  function makeRow(item, drawingsById, project) {
     const id = item.id;
     const tr = el('tr', { dataset: { id } });
 
@@ -329,13 +333,21 @@ export function createListView({ ctx, onOpenItem, onNewItem, onShowOnDrawing, on
     statusSelect.value = item.status;
     statusSelect.addEventListener('change', () => commit({ status: statusSelect.value }));
 
-    const tradeOptions = [...trades];
-    if (item.trade && !tradeOptions.includes(item.trade)) tradeOptions.push(item.trade);
-    const tradeSelect = el('select', { class: 'cell-select', 'aria-label': `Trade for item ${itemName(item)}` },
-      el('option', { value: '' }, '—'),
-      tradeOptions.map((t) => el('option', { value: t }, t)));
-    tradeSelect.value = item.trade || '';
-    tradeSelect.addEventListener('change', () => commit({ trade: tradeSelect.value }));
+    // Trades: tap to pick one or more in a pop-up.
+    const tradeCell = el('button', {
+      type: 'button', class: 'trade-cell', 'aria-label': `Trades for item ${itemName(item)}`,
+      onclick: () => openTradePicker({
+        project,
+        item: currentItem(),
+        onTradesChanged,
+        onDone: (trades) => commit({ trades }),
+      }),
+    });
+    const showTrades = (it) => {
+      tradeCell.textContent = tradesText(it) || '—';
+      tradeCell.classList.toggle('empty-cell', !(it.trades || []).length);
+    };
+    showTrades(item);
 
     const drawing = drawingsById[item.drawingId];
     const updatedCell = el('td', { class: 'col-updatedAt muted' }, shortDate(item.updatedAt));
@@ -344,7 +356,7 @@ export function createListView({ ctx, onOpenItem, onNewItem, onShowOnDrawing, on
       el('td', { class: 'col-number' }, badge),
       el('td', { class: 'col-title' }, textCell('title', 'Title')),
       el('td', { class: 'col-status' }, statusSelect),
-      el('td', { class: 'col-trade' }, tradeSelect),
+      el('td', { class: 'col-trade' }, tradeCell),
       el('td', { class: 'col-location' }, textCell('location', '—')),
       el('td', { class: 'col-description' }, textCell('description', '—')),
       el('td', { class: 'col-sheet' }, item.drawingId
@@ -365,6 +377,7 @@ export function createListView({ ctx, onOpenItem, onNewItem, onShowOnDrawing, on
         badge.dataset.status = key;
         statusSelect.dataset.status = key;
         updatedCell.textContent = shortDate(updated.updatedAt);
+        showTrades(updated);
         tr.classList.toggle('filtered-out', !isShown(updated));
         tr.title = isShown(updated) ? '' : 'Hidden by your filters — will disappear when the list refreshes';
         tr.classList.remove('saved');
