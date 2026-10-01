@@ -24,7 +24,7 @@ export function el(tag, props = {}, ...children) {
 // App-icon files for the home screen are separate: icons/ and manifest.json.
 // Shown on the Projects screen so you can tell which version a device is running.
 // Must match VERSION in sw.js — bump both on every publish.
-export const APP_VERSION = 'v12';
+export const APP_VERSION = 'v13';
 
 export const BRAND = {
   name: 'Punch List',
@@ -58,29 +58,6 @@ export function statusKey(status) {
     'Ready for Review': 'review',
     'Closed': 'closed',
   }[status] || 'open';
-}
-
-// ---------- Diagnostic mode (temporary, for tracking down phone-only bugs) ----------
-// Open the app with ?debug=1 on the end of the address to turn it on. Each step is
-// written to a yellow box at the bottom AND into the top bar's title (in case
-// pop-ups are what's broken).
-export const DEBUG = /[?&]debug\b/.test(location.search);
-const debugLines = [];
-export function debugLog(msg) {
-  if (!DEBUG) return;
-  debugLines.push(msg);
-  let box = document.getElementById('debug-log');
-  if (!box) {
-    box = document.createElement('div');
-    box.id = 'debug-log';
-    box.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:2147483647;max-height:45%;overflow:auto;'
-      + 'background:#ffeb3b;color:#000;font:12px/1.35 ui-monospace,monospace;padding:6px 8px;white-space:pre-wrap;';
-    document.body.append(box);
-  }
-  box.textContent = debugLines.slice(-40).join('\n');
-  box.scrollTop = box.scrollHeight;
-  const title = document.querySelector('.topbar h1');
-  if (title) title.textContent = msg;
 }
 
 let toastTimer;

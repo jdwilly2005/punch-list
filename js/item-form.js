@@ -1,7 +1,7 @@
 // item-form.js — the pop-up form for creating or editing a punch item.
 
 import * as data from './db.js';
-import { el, toast, statusKey, debugLog } from './ui.js';
+import { el, toast, statusKey } from './ui.js';
 import { preparePhoto, openMarkup } from './photo-markup.js';
 import { openTradeManager, resolveTrade } from './trades.js';
 
@@ -13,7 +13,6 @@ const MANAGE_TRADES = '__manage__';
 // onClose(result) is called with { saved } / { deleted } / null (cancelled).
 export async function openItemForm({ project, drawing, item, onClose }) {
   const isNew = !item.id;
-  debugLog('2. form: started');
   const photos = isNew ? [] : (await data.listPhotos(item.id)).map((p) => ({ ...p, isNew: false }));
   const objectUrls = [];
 
@@ -31,7 +30,6 @@ export async function openItemForm({ project, drawing, item, onClose }) {
     placeholder: `Automatic: #${autoNumber}`,
   });
   tagInput.addEventListener('input', () => tagInput.classList.remove('invalid'));
-  debugLog(`3. form: next number is ${autoNumber}`);
 
   const statusSeg = el('div', { class: 'status-seg', role: 'radiogroup', 'aria-label': 'Status' },
     data.STATUSES.map((s) => el('label', { class: 'seg', dataset: { status: statusKey(s) } },
@@ -164,17 +162,6 @@ export async function openItemForm({ project, drawing, item, onClose }) {
 
   const backdrop = el('div', { class: 'pl-layer' }, form);
   document.body.append(backdrop);
-  debugLog('4. form: added to page');
-  setTimeout(() => {
-    // Where did it end up, and is anything covering it?
-    const r = form.getBoundingClientRect();
-    const cs = getComputedStyle(backdrop);
-    const hit = document.elementFromPoint(innerWidth / 2, r.top + 20);
-    debugLog(`5. form box: top ${Math.round(r.top)} h ${Math.round(r.height)} w ${Math.round(r.width)} · `
-      + `backdrop ${cs.display}/${cs.visibility}/${cs.opacity}/z${cs.zIndex} · `
-      + `screen ${innerWidth}x${innerHeight} · on top: ${hit ? `${hit.tagName}.${hit.className}` : 'nothing'} · `
-      + `in page: ${document.body.contains(backdrop)}`);
-  }, 400);
   if (isNew) setTimeout(() => titleInput.focus(), 50);
 
   form.addEventListener('submit', async (e) => {

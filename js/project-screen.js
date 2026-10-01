@@ -5,7 +5,7 @@
 // Any change on either tab updates the other, because both read the same `items`.
 
 import * as data from './db.js';
-import { el, toast, busy, statusKey, brandLink, debugLog } from './ui.js';
+import { el, toast, busy, statusKey, brandLink } from './ui.js';
 import { readPdfPages, readImageSize } from './sheet-render.js';
 import { DrawingView } from './drawing-view.js';
 import { openItemForm } from './item-form.js';
@@ -260,10 +260,8 @@ export async function renderProject(app, projectId, initialTab, isStale) {
 
   // Opens the item form; if it fails, say so on screen instead of silently doing nothing.
   function showForm(opts) {
-    debugLog('1. opening item form');
     openItemForm(opts).catch((err) => {
       console.error(err);
-      debugLog(`FORM FAILED: ${err && err.stack ? err.stack : err}`);
       view.clearPendingPin();
       toast(`Could not open the item form: ${err.message}`, 5000);
     });
