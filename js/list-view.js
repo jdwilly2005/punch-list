@@ -269,13 +269,13 @@ export function createListView({ ctx, onOpenItem, onNewItem, onShowOnDrawing, on
     pdfBtn.addEventListener('click', () => run('pdf', pdfBtn));
     const closedCount = rows.filter((i) => i.status === 'Closed').length;
 
-    const backdrop = el('div', { class: 'modal-backdrop' },
-      el('div', { class: 'modal' },
-        el('div', { class: 'modal-head' },
+    const backdrop = el('div', { class: 'pl-layer' },
+      el('div', { class: 'pl-sheet' },
+        el('div', { class: 'pl-sheet-head' },
           el('button', { type: 'button', class: 'btn btn-ghost', onclick: () => close() }, 'Cancel'),
           el('h2', {}, 'Export punch list'),
           el('span', { class: 'head-spacer' })),
-        el('div', { class: 'modal-body' },
+        el('div', { class: 'pl-sheet-body' },
           el('p', { class: 'meta' },
             `${rows.length} item${rows.length === 1 ? '' : 's'}, in the order shown in the list.`,
             narrowed || isFiltering(ctx().filter) ? ` Included: ${describeFilters()}.` : ''),

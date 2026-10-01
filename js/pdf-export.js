@@ -318,13 +318,13 @@ export function openDrawingPdfDialog({ project, drawings, current, items, filter
       : 'No pins match your filters'));
   allBtn.addEventListener('click', () => run(sheetsWithPins.map((d) => d.id)));
 
-  const backdrop = el('div', { class: 'modal-backdrop' },
-    el('div', { class: 'modal' },
-      el('div', { class: 'modal-head' },
+  const backdrop = el('div', { class: 'pl-layer' },
+    el('div', { class: 'pl-sheet' },
+      el('div', { class: 'pl-sheet-head' },
         el('button', { type: 'button', class: 'btn btn-ghost', onclick: () => close() }, 'Cancel'),
         el('h2', {}, 'Drawings PDF'),
         el('span', { class: 'head-spacer' })),
-      el('div', { class: 'modal-body' },
+      el('div', { class: 'pl-sheet-body' },
         el('p', { class: 'meta' }, filterText
           ? `Only the pins your filters show are included (${filterText}).`
           : 'All pins are included. Use the status chips or trade filter first to narrow it down.'),

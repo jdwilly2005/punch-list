@@ -9,7 +9,7 @@
 // When you add a new file to the app, also add it to APP_FILES.
 // On localhost the network is always used, so local testing never shows stale files.
 
-const VERSION = 'v10';
+const VERSION = 'v11';
 const CACHE = `punchlist-${VERSION}`;
 const APP_FILES = [
   './',

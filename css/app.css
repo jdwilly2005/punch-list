@@ -240,26 +240,26 @@ input.invalid { border-color: var(--danger); }
 
 /* ---------- Item form (bottom sheet on phones, centered dialog on wide screens) ---------- */
 
-.modal-backdrop {
+.pl-layer {
   position: fixed; inset: 0; z-index: 50;
   display: flex; align-items: flex-end; justify-content: center;
   background: rgba(0,0,0,.45);
 }
-.modal {
+.pl-sheet {
   width: 100%; max-width: 560px; max-height: calc(100% - var(--safe-top) - 24px);
   display: flex; flex-direction: column;
   background: var(--surface); border-radius: 16px 16px 0 0;
 }
 @media (min-width: 640px) {
-  .modal-backdrop { align-items: center; }
-  .modal { border-radius: 16px; max-height: 90%; }
+  .pl-layer { align-items: center; }
+  .pl-sheet { border-radius: 16px; max-height: 90%; }
 }
-.modal-head {
+.pl-sheet-head {
   display: flex; align-items: center; gap: 8px; padding: 8px 10px;
   border-bottom: 1px solid var(--border);
 }
-.modal-head h2 { flex: 1; margin: 0; font-size: 17px; text-align: center; }
-.modal-body {
+.pl-sheet-head h2 { flex: 1; margin: 0; font-size: 17px; text-align: center; }
+.pl-sheet-body {
   overflow: auto; padding: 16px; padding-bottom: calc(20px + var(--safe-bottom));
   display: flex; flex-direction: column; gap: 16px;
 }
@@ -419,15 +419,15 @@ tr.saved td { animation: saved 1.2s ease-out; }
 
 /* ---------- Toast & busy overlay ---------- */
 
-.toast {
+.pl-note {
   position: fixed; left: 50%; bottom: calc(24px + var(--safe-bottom)); z-index: 100;
   transform: translate(-50%, 20px); opacity: 0; transition: opacity .2s, transform .2s;
   background: #1f2933; color: #fff; padding: 10px 16px; border-radius: 12px;
   font-size: 15px; max-width: calc(100% - 32px); pointer-events: none;
 }
-.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.pl-note.show { opacity: 1; transform: translate(-50%, 0); }
 
-.busy { position: fixed; inset: 0; z-index: 90; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.35); }
-.busy-box { display: flex; align-items: center; gap: 12px; background: var(--surface); padding: 16px 20px; border-radius: 12px; }
+.pl-working { position: fixed; inset: 0; z-index: 90; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.35); }
+.pl-working-box { display: flex; align-items: center; gap: 12px; background: var(--surface); padding: 16px 20px; border-radius: 12px; }
 .spinner { width: 22px; height: 22px; border-radius: 50%; border: 3px solid var(--border); border-top-color: var(--accent); animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

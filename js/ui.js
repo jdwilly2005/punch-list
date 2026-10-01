@@ -24,7 +24,7 @@ export function el(tag, props = {}, ...children) {
 // App-icon files for the home screen are separate: icons/ and manifest.json.
 // Shown on the Projects screen so you can tell which version a device is running.
 // Must match VERSION in sw.js — bump both on every publish.
-export const APP_VERSION = 'v10';
+export const APP_VERSION = 'v11';
 
 export const BRAND = {
   name: 'Punch List',
@@ -85,9 +85,9 @@ export function debugLog(msg) {
 
 let toastTimer;
 export function toast(message, ms = 2400) {
-  let node = document.querySelector('.toast');
+  let node = document.querySelector('.pl-note');
   if (!node) {
-    node = el('div', { class: 'toast', role: 'status' });
+    node = el('div', { class: 'pl-note', role: 'status' });
     document.body.append(node);
   }
   node.textContent = message;
@@ -98,8 +98,8 @@ export function toast(message, ms = 2400) {
 
 // Full-screen "working…" overlay. Returns a function that hides it.
 export function busy(message) {
-  const overlay = el('div', { class: 'busy' },
-    el('div', { class: 'busy-box' }, el('div', { class: 'spinner' }), message));
+  const overlay = el('div', { class: 'pl-working' },
+    el('div', { class: 'pl-working-box' }, el('div', { class: 'spinner' }), message));
   document.body.append(overlay);
   return () => overlay.remove();
 }

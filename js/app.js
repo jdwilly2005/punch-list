@@ -94,7 +94,7 @@ if ('serviceWorker' in navigator) {
     if (!hadVersion) return;
     toast('Updating the app…');
     const tryReload = () => {
-      if (document.querySelector('.modal-backdrop, .markup, .busy')) setTimeout(tryReload, 1500);
+      if (document.querySelector('.pl-layer, .markup, .pl-working')) setTimeout(tryReload, 1500);
       else location.reload();
     };
     setTimeout(tryReload, 800);

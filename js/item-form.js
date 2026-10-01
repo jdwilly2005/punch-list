@@ -144,12 +144,12 @@ export async function openItemForm({ project, drawing, item, onClose }) {
   const saveBtn = el('button', { type: 'submit', class: 'btn btn-primary' }, 'Save');
   const field = (label, control) => el('label', { class: 'field' }, el('span', { class: 'field-label' }, label), control);
 
-  const form = el('form', { class: 'modal', novalidate: true },
-    el('div', { class: 'modal-head' },
+  const form = el('form', { class: 'pl-sheet', novalidate: true },
+    el('div', { class: 'pl-sheet-head' },
       el('button', { type: 'button', class: 'btn btn-ghost', onclick: () => close(null) }, 'Cancel'),
       el('h2', {}, isNew ? 'New punch item' : `Item ${data.itemName(item)}`),
       saveBtn),
-    el('div', { class: 'modal-body' },
+    el('div', { class: 'pl-sheet-body' },
       field('Title', titleInput),
       el('label', { class: 'field' }, el('span', { class: 'field-label' }, 'Number / tag'), tagInput,
         el('small', { class: 'field-hint' }, 'Leave blank to number automatically, or type your own tag (e.g. CB-12).')),
@@ -162,7 +162,7 @@ export async function openItemForm({ project, drawing, item, onClose }) {
         isNew ? null : ` · Created ${new Date(item.createdAt).toLocaleDateString()}`),
       isNew ? null : el('button', { type: 'button', class: 'btn btn-danger', onclick: remove }, 'Delete item')));
 
-  const backdrop = el('div', { class: 'modal-backdrop' }, form);
+  const backdrop = el('div', { class: 'pl-layer' }, form);
   document.body.append(backdrop);
   debugLog('4. form: added to page');
   setTimeout(() => {

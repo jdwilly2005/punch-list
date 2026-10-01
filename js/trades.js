@@ -81,13 +81,13 @@ export function openTradeManager({ projectId, onClose }) {
     await renderList();
   }
 
-  const backdrop = el('div', { class: 'modal-backdrop' },
-    el('div', { class: 'modal' },
-      el('div', { class: 'modal-head' },
+  const backdrop = el('div', { class: 'pl-layer' },
+    el('div', { class: 'pl-sheet' },
+      el('div', { class: 'pl-sheet-head' },
         el('span', { class: 'head-spacer' }),
         el('h2', {}, 'Trades & subs'),
         el('button', { type: 'button', class: 'btn btn-primary', onclick: close }, 'Done')),
-      el('div', { class: 'modal-body' }, addForm, listEl)));
+      el('div', { class: 'pl-sheet-body' }, addForm, listEl)));
   document.body.append(backdrop);
   renderList();
 
