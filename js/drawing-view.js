@@ -49,6 +49,13 @@ export class DrawingView {
     stage.addEventListener('pointermove', (e) => this.onMove(e));
     stage.addEventListener('pointerup', (e) => this.onUp(e));
     stage.addEventListener('pointercancel', (e) => this.onUp(e));
+    // iPhone/iPad Safari can send the "finger lifted" event somewhere else (e.g. to the
+    // item form that just opened under the finger). If the drawing never hears it, it
+    // thinks that finger is still down and treats every later touch as a pinch.
+    stage.addEventListener('lostpointercapture', (e) => this.forget(e.pointerId));
+    this.onWindowUp = (e) => this.forget(e.pointerId);
+    window.addEventListener('pointerup', this.onWindowUp); // runs after the stage's own handler
+    window.addEventListener('pointercancel', this.onWindowUp);
     stage.addEventListener('contextmenu', (e) => e.preventDefault()); // Android long-press menu
     stage.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
     // Safari trackpad pinch (desktop). On iPhone, pinch is handled by pointer events.
@@ -123,6 +130,8 @@ export class DrawingView {
   }
 
   destroy() {
+    window.removeEventListener('pointerup', this.onWindowUp);
+    window.removeEventListener('pointercancel', this.onWindowUp);
     this.token++;
     this.clearSheet();
     this.resizeObserver.disconnect();
@@ -219,8 +228,21 @@ export class DrawingView {
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   }
 
+  // Drop a finger we've lost track of (see constructor).
+  forget(pointerId) {
+    if (!this.pointers.has(pointerId)) return;
+    this.pointers.delete(pointerId);
+    this.cancelPress();
+    if (this.pointers.size === 0) this.gesture = null;
+  }
+
   onDown(e) {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
+    // The first finger of a new touch: anything still on record is left over, so start fresh.
+    if (e.isPrimary) {
+      this.pointers.clear();
+      this.cancelPress();
+    }
     const p = this.localPoint(e);
     const pinEl = e.target.closest('.pin');
     this.stage.setPointerCapture(e.pointerId);
@@ -311,6 +333,7 @@ export class DrawingView {
     this.pressTimer = setTimeout(() => {
       this.cancelPress();
       g.type = 'done'; // ignore the rest of this touch
+      this.pointers.clear(); // the form opens under the finger; don't wait to hear it lift
       if (navigator.vibrate) navigator.vibrate(15);
       this.onLongPress(spot.x, spot.y);
     }, LONG_PRESS_MS);
