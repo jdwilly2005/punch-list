@@ -24,7 +24,7 @@ export function el(tag, props = {}, ...children) {
 // App-icon files for the home screen are separate: icons/ and manifest.json.
 // Shown on the Projects screen so you can tell which version a device is running.
 // Must match VERSION in sw.js — bump both on every publish.
-export const APP_VERSION = 'v17';
+export const APP_VERSION = 'v18';
 
 export const BRAND = {
   name: 'Punch List',
@@ -49,6 +49,8 @@ export const STATUS_COLORS = {
   'Ready for Review': '#1a73e8',
   'Closed': '#188038',
 };
+// Gray for grouped pins ("+N" on screen, combined labels on PDFs). Same as --pin-group in app.css.
+export const GROUP_PIN_COLOR = '#59636e';
 
 // Status name -> short key used for CSS colors (e.g. data-status="progress").
 export function statusKey(status) {

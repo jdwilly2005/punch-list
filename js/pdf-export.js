@@ -10,7 +10,7 @@
 
 import * as data from './db.js';
 import { itemRef, compareItems, STATUSES } from './db.js';
-import { el, toast, busy, optionCards, BRAND, STATUS_COLORS } from './ui.js';
+import { el, toast, busy, optionCards, BRAND, STATUS_COLORS, GROUP_PIN_COLOR } from './ui.js';
 import { getPdf } from './sheet-render.js';
 import { loadVendorScript, downloadBlob } from './export.js';
 
@@ -239,29 +239,124 @@ export function pill(page, cx, cy, w, h, c) {
   page.drawCircle({ x: cx + w / 2 - r, y: cy, size: r, color: c });
 }
 
-// Same shape as the app's pins: a numbered circle with a point at the exact spot.
+// Pins on a printed sheet. There's no zooming on paper, so pins that would overlap at the
+// printed size are grouped (by their printed size, so 11x17 groups more than full size):
+//   - 1 pin: the normal pin, like the app (numbered circle with a point at the exact spot)
+//   - 2-6 overlapping: "balloon" callouts — each item keeps its own numbered, colored circle,
+//     fanned out around the spot, with a thin leader line to a dot at its exact location
+//   - 7+: one gray pin listing the numbers ("3 · 7 · 12 +4"), with a dot at each exact spot
+// (Idea for later, see CLAUDE.md: Bluebeam-style shaded box + enlarged "Detail A" panel.)
+const MAX_BALLOONS = 6;
+
 // box: where the sheet sits on the page. size: pin circle size in points (default scales with the sheet).
 function drawPins(page, pins, box, font, size = null) {
-  const white = color('#ffffff');
   const d = size || clamp(Math.min(box.w, box.h) * 0.017, 17, 40);
+  const spots = pins.map((item) => ({
+    item,
+    x: box.x + item.x * box.w,
+    y: box.y + (1 - item.y) * box.h, // app measures from the top; PDF from the bottom
+  }));
+  for (const group of groupSpots(spots, d)) {
+    if (group.length === 1) {
+      const { item, x, y } = group[0];
+      drawPin(page, font, d, x, y, itemRef(item), STATUS_COLORS[item.status] || STATUS_COLORS.Open, true);
+    } else if (group.length <= MAX_BALLOONS) {
+      drawBalloons(page, font, d, group, box);
+    } else {
+      drawCombined(page, font, d, group);
+    }
+  }
+}
+
+// Groups pins whose printed markers would overlap (chains count: if A overlaps B and B
+// overlaps C, all three are one group).
+function groupSpots(spots, d) {
+  const overlaps = (a, b) => Math.abs(a.x - b.x) < d * 1.1 && Math.abs(a.y - b.y) < d * 1.5;
+  const groups = [];
+  for (const spot of spots) {
+    const touching = groups.filter((g) => g.some((o) => overlaps(o, spot)));
+    const merged = [spot, ...touching.flat()];
+    for (const g of touching) groups.splice(groups.indexOf(g), 1);
+    groups.push(merged);
+  }
+  return groups;
+}
+
+// One marker: a numbered circle/pill, with the point at (x, y) when `tail` is true,
+// or centered on (x, y) when it's a balloon (no tail).
+function drawPin(page, font, d, x, y, label, hex, tail) {
+  const white = color('#ffffff');
+  const c = color(hex);
   const border = d * 0.07;
   const fs = d * 0.42;
-  for (const item of pins) {
-    const c = color(STATUS_COLORS[item.status] || STATUS_COLORS.Open);
-    const tipX = box.x + item.x * box.w;
-    const tipY = box.y + (1 - item.y) * box.h; // app measures from the top; PDF from the bottom
-    const cy = tipY + d * 0.81;
-    const label = safeText(font, itemRef(item));
-    const tw = font.widthOfTextAtSize(label, fs);
-    const w = Math.max(d, tw + d * 0.45);
+  const text = safeText(font, label);
+  const tw = font.widthOfTextAtSize(text, fs);
+  const w = Math.max(d, tw + d * 0.45);
+  const cy = tail ? y + d * 0.81 : y;
+  if (tail) {
     const a = d * 0.22;
-    const tail = `M 0 0 L ${-a} ${-d * 0.41} L ${a} ${-d * 0.41} Z`; // SVG y points down
-    page.drawSvgPath(tail, { x: tipX, y: tipY, color: white, borderColor: white, borderWidth: border * 1.6 });
-    pill(page, tipX, cy, w + border * 2, d + border * 2, white);
-    page.drawSvgPath(tail, { x: tipX, y: tipY, color: c });
-    pill(page, tipX, cy, w, d, c);
-    page.drawText(label, { x: tipX - tw / 2, y: cy - fs * 0.36, size: fs, font, color: white });
+    const path = `M 0 0 L ${-a} ${-d * 0.41} L ${a} ${-d * 0.41} Z`; // SVG y points down
+    page.drawSvgPath(path, { x, y, color: white, borderColor: white, borderWidth: border * 1.6 });
+    pill(page, x, cy, w + border * 2, d + border * 2, white);
+    page.drawSvgPath(path, { x, y, color: c });
+  } else {
+    pill(page, x, cy, w + border * 2, d + border * 2, white);
   }
+  pill(page, x, cy, w, d, c);
+  page.drawText(text, { x: x - tw / 2, y: cy - fs * 0.36, size: fs, font, color: white });
+}
+
+// Small dot marking an item's exact spot (used by balloons and combined pins).
+function drawSpotDot(page, d, x, y, hex) {
+  page.drawCircle({ x, y, size: d * 0.16, color: color(hex), borderColor: color('#ffffff'), borderWidth: d * 0.05 });
+}
+
+// 2-6 overlapping pins: fan their circles out on an arc around the spot, each with a leader line.
+function drawBalloons(page, font, d, group, box) {
+  const ink = color('#1f2933');
+  const cx = group.reduce((sum, g) => sum + g.x, 0) / group.length;
+  const cy = group.reduce((sum, g) => sum + g.y, 0) / group.length;
+  const members = [...group].sort((a, b) => a.x - b.x || compareItems(a.item, b.item)); // left to right = fewer crossings
+  const n = members.length;
+  const radius = d * (1.5 + n * 0.28);
+  const spread = Math.min(150, 45 * (n - 1)); // degrees the fan covers
+  const at = (upward) => members.map((m, i) => {
+    const deg = 90 + spread / 2 - (n > 1 ? (spread * i) / (n - 1) : 0); // left to right
+    const rad = ((upward ? deg : -deg) * Math.PI) / 180;
+    return { m, x: cx + radius * Math.cos(rad), y: cy + radius * Math.sin(rad) };
+  });
+  // Fan upward; if that runs off the sheet, fan downward; keep every balloon on the sheet.
+  const inside = (b) => b.x > box.x + d && b.x < box.x + box.w - d && b.y > box.y + d && b.y < box.y + box.h - d;
+  let balloons = at(true);
+  if (!balloons.every(inside)) {
+    const down = at(false);
+    if (down.filter(inside).length > balloons.filter(inside).length) balloons = down;
+  }
+  for (const b of balloons) {
+    b.x = clamp(b.x, box.x + d * 0.7, box.x + box.w - d * 0.7);
+    b.y = clamp(b.y, box.y + d * 0.7, box.y + box.h - d * 0.7);
+  }
+  // Leaders first (under the circles), then the dots at the exact spots, then the circles.
+  const lineW = Math.max(0.6, d * 0.055);
+  for (const b of balloons) {
+    page.drawLine({ start: { x: b.x, y: b.y }, end: { x: b.m.x, y: b.m.y }, thickness: lineW * 2.4, color: color('#ffffff') });
+    page.drawLine({ start: { x: b.x, y: b.y }, end: { x: b.m.x, y: b.m.y }, thickness: lineW, color: ink });
+  }
+  for (const b of balloons) drawSpotDot(page, d, b.m.x, b.m.y, STATUS_COLORS[b.m.item.status] || STATUS_COLORS.Open);
+  for (const b of balloons) {
+    drawPin(page, font, d, b.x, b.y, itemRef(b.m.item), STATUS_COLORS[b.m.item.status] || STATUS_COLORS.Open, false);
+  }
+}
+
+// 7+ overlapping pins: one gray pin that lists the numbers.
+function drawCombined(page, font, d, group) {
+  const members = [...group].sort((a, b) => compareItems(a.item, b.item));
+  const cx = members.reduce((sum, g) => sum + g.x, 0) / members.length;
+  const cy = members.reduce((sum, g) => sum + g.y, 0) / members.length;
+  const shown = members.slice(0, 4).map((g) => itemRef(g.item)).join(' · ');
+  const label = members.length > 4 ? `${shown} +${members.length - 4}` : shown;
+  for (const g of members) drawSpotDot(page, d, g.x, g.y, STATUS_COLORS[g.item.status] || STATUS_COLORS.Open);
+  drawPin(page, font, d, cx, cy, label, GROUP_PIN_COLOR, true);
 }
 
 function drawBand(page, { x, y, w, h, fonts, logo, pins, today, title, sheet, filterText }) {
