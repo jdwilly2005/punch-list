@@ -39,11 +39,11 @@ export async function backUpEverything() {
   }
 }
 
-// "Last backup: Oct 4, 2026" for the Projects screen ('' if never).
+// "Oct 4, 2026, 2:32 PM" for the Projects screen ('' if never).
 export function lastBackupDate() {
   let iso = null;
   try { iso = localStorage.getItem(LAST_BACKUP_KEY); } catch { /* private mode */ }
-  return iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+  return iso ? when(iso) : '';
 }
 
 async function buildFile(projectIds, fileName) {
@@ -288,7 +288,12 @@ async function copyName(name) {
 // ---------- Small helpers ----------
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
-const today = () => new Date().toLocaleDateString('en-CA'); // 2026-10-04
+// For file names: "2026-10-04 at 2.32 PM" (no ":" — it isn't allowed in file names).
+const today = () => {
+  const d = new Date();
+  const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).replace(':', '.');
+  return `${d.toLocaleDateString('en-CA')} at ${time}`;
+};
 const safeName = (s) => s.replace(/[\\/:*?"<>|]+/g, '-').trim() || 'Project';
 const when = (iso) => (iso
   ? new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
