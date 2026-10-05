@@ -9,6 +9,7 @@
 import * as data from './db.js';
 import { el, toast, brandLink, choose, APP_VERSION } from './ui.js';
 import { renderProject } from './project-screen.js';
+import { shareProject, backUpEverything, pickAndImport, lastBackupDate } from './backup.js';
 
 const app = document.getElementById('app');
 let cleanup = null;
@@ -76,10 +77,30 @@ async function renderHome(token) {
       el('div', { class: 'project-list' }, archived))
     : null;
 
+  const last = lastBackupDate();
+  const backup = el('section', { class: 'backup-tools' },
+    el('h2', { class: 'section-title' }, 'Backup & sharing'),
+    el('div', { class: 'backup-buttons' },
+      el('button', { type: 'button', class: 'btn', onclick: importProjects }, 'Import project file'),
+      el('button', {
+        type: 'button', class: 'btn', disabled: !projects.length,
+        onclick: async () => { await backUpEverything(); route(); },
+      }, 'Back up everything')),
+    el('p', { class: 'backup-note' },
+      'To send one project to someone, use its ⋯ menu › Share project file. ',
+      projects.length ? (last ? `Last full backup from this device: ${last}.` : 'No full backup from this device yet.') : null));
+
   app.replaceChildren(
     el('header', { class: 'topbar' }, brandLink({ showName: true })),
-    el('main', { class: 'scroll' }, el('h2', { class: 'section-title' }, 'Projects'), form, list, archive,
+    el('main', { class: 'scroll' }, el('h2', { class: 'section-title' }, 'Projects'), form, list, archive, backup,
       el('p', { class: 'app-version' }, `Version ${APP_VERSION}`)));
+}
+
+// Import a .punchlist file. One project opens straight away; several redraw the list.
+async function importProjects() {
+  const done = await pickAndImport();
+  if (done.length === 1) location.hash = `#/p/${done[0].id}`;
+  else if (done.length) route();
 }
 
 // A project's ⋯ menu: rename, archive / un-archive, delete.
@@ -87,6 +108,7 @@ async function projectMenu(project, summary) {
   const action = await choose({
     title: project.name,
     choices: [
+      { label: 'Share project file…', value: 'share', note: 'Send a copy, with photos and drawings, to another person or device' },
       { label: 'Rename', value: 'rename' },
       project.archivedAt
         ? { label: 'Move back to active projects', value: 'unarchive' }
@@ -94,7 +116,10 @@ async function projectMenu(project, summary) {
       { label: 'Delete project…', value: 'delete', kind: 'danger' },
     ],
   });
-  if (action === 'rename') {
+  if (action === 'share') {
+    await shareProject(project);
+    return;
+  } else if (action === 'rename') {
     const name = (window.prompt('Project name', project.name) || '').trim();
     if (!name || name === project.name) return;
     await data.updateProject(project.id, { name });

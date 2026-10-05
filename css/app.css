@@ -118,6 +118,10 @@ input.invalid { border-color: var(--danger); }
 }
 .archive .project-list { margin-top: 8px; }
 .empty { color: var(--muted); text-align: center; margin-top: 40px; }
+.backup-tools { margin-top: 32px; }
+.backup-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.backup-buttons .btn { flex: 1 1 160px; }
+.backup-note { color: var(--muted); font-size: 13px; margin: 10px 2px 0; line-height: 1.4; }
 .app-version { color: var(--muted); font-size: 12px; text-align: center; margin: 32px 0 0; opacity: .8; }
 
 /* ---------- Project / drawing screen ---------- */
@@ -383,7 +387,7 @@ input.invalid { border-color: var(--danger); }
 .pl-choose { max-width: 440px; }
 .pl-choose .pl-sheet-body { gap: 10px; }
 .choose-title { margin: 0; font-size: 18px; text-align: center; }
-.choose-message { margin: 0 0 6px; color: var(--muted); font-size: 15px; text-align: center; line-height: 1.4; }
+.choose-message { white-space: pre-line; margin: 0 0 6px; color: var(--muted); font-size: 15px; text-align: center; line-height: 1.4; }
 .choose-btn { width: 100%; min-height: 48px; flex-direction: column; gap: 2px; }
 .choose-btn small { font-size: 12px; font-weight: 400; opacity: .85; }
 .btn-danger.choose-btn { background: var(--danger); color: #fff; font-weight: 600; }

@@ -369,3 +369,73 @@ export async function listProjectPhotos(projectId) {
   const all = (await db.photos.where('projectId').equals(projectId).toArray()).filter(alive);
   return all.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
+
+// ---------- Whole projects (for the backup / share file, see backup.js) ----------
+
+// Everything that makes up one project, with drawing files and photos as Blobs.
+// Deleted records are left out.
+export async function readProjectBundle(projectId) {
+  const of = (table) => table.where('projectId').equals(projectId).filter(alive).toArray();
+  const [project, files, drawings, items, photos] = await Promise.all([
+    getProject(projectId), of(db.files), of(db.drawings), of(db.items), of(db.photos),
+  ]);
+  return project && { project, files, drawings, items, photos };
+}
+
+// The last time anything in the project changed (an item, a sheet, a photo...).
+export async function projectLastChanged(projectId) {
+  let last = (await db.projects.get(projectId))?.updatedAt || '';
+  for (const table of [db.files, db.drawings, db.items, db.photos]) {
+    await table.where('projectId').equals(projectId).each((r) => { if (r.updatedAt > last) last = r.updatedAt; });
+  }
+  return last;
+}
+
+// Saves a project from a backup / share file.
+//   asCopy: false -> keeps the file's ids. If the project is already on this device it is
+//           REPLACED: anything here that the file doesn't have is removed.
+//   asCopy: true  -> saves it as a separate project with fresh ids, named `name`.
+export async function writeProjectBundle(bundle, { asCopy = false, name } = {}) {
+  const b = asCopy ? copyBundle(bundle, name) : bundle;
+  const projectId = b.project.id;
+  const tables = { files: db.files, drawings: db.drawings, items: db.items, photos: db.photos };
+  const blobsGone = { files: { blob: null }, photos: BLOBS_GONE };
+  for (const key of Object.keys(tables)) {
+    b[key] = b[key].map((r) => ({ ...r, projectId, deletedAt: null }));
+  }
+  b.items = b.items.map((i) => ({ ...i, trades: Array.isArray(i.trades) ? i.trades : (i.trade ? [i.trade] : []) }));
+
+  await db.transaction('rw', [db.projects, ...Object.values(tables)], async () => {
+    const t = now();
+    for (const [key, table] of Object.entries(tables)) {
+      const keep = new Set(b[key].map((r) => r.id));
+      await table.where('projectId').equals(projectId).filter((r) => alive(r) && !keep.has(r.id))
+        .modify({ deletedAt: t, updatedAt: t, ...blobsGone[key] });
+      await table.bulkPut(b[key]);
+    }
+    await db.projects.put({ trades: [], ...b.project, deletedAt: null });
+  });
+  return b.project;
+}
+
+// Same project with brand-new ids (links between records kept), so it sits beside the original.
+function copyBundle(b, name) {
+  const ids = new Map();
+  const map = (id) => {
+    if (id == null) return id;
+    if (!ids.has(id)) ids.set(id, newId());
+    return ids.get(id);
+  };
+  const re = (r, ...links) => {
+    const c = { ...r, id: map(r.id) };
+    for (const f of links) c[f] = map(r[f]);
+    return c;
+  };
+  return {
+    project: { ...re(b.project), name, updatedAt: now() },
+    files: b.files.map((r) => re(r)),
+    drawings: b.drawings.map((r) => re(r, 'fileId')),
+    items: b.items.map((r) => re(r, 'drawingId')),
+    photos: b.photos.map((r) => re(r, 'itemId')),
+  };
+}
