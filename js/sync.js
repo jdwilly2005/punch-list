@@ -7,6 +7,9 @@
 //   2. DOWNLOAD: anything that changed in the cloud since this device last looked (per project,
 //      by the server's `synced_at`) is merged in, then missing files/photos are downloaded.
 // Conflicts: the newer `updatedAt` (device time of the edit) wins, on both sides.
+// Files mode (per device): 'all' downloads every drawing file and photo ahead of time (phones and
+// tablets, for working without signal); 'open' downloads each one only when a screen needs it
+// (computers, to save space) — see setBlobFetcher in db.js.
 // Runs: when the app opens, a few seconds after an edit, when signal returns, and every minute.
 
 import * as data from './db.js';
@@ -64,6 +67,108 @@ const BLOB_FIELDS = {
 };
 const GONE = { files: { blob: null }, photos: { originalBlob: null, annotatedBlob: null } };
 
+// ---------- Files mode + freeing space ----------
+
+const MODE_KEY = 'punchlist:fileMode';
+export function fileMode() {
+  try {
+    const saved = localStorage.getItem(MODE_KEY);
+    if (saved === 'all' || saved === 'open') return saved;
+  } catch { /* not remembered */ }
+  return window.matchMedia('(pointer: coarse)').matches ? 'all' : 'open'; // touch screen = in the field
+}
+export function setFileMode(mode) {
+  try { localStorage.setItem(MODE_KEY, mode); } catch { /* not remembered */ }
+  if (mode === 'all') syncNow();
+}
+
+// Removes this device's copies of drawing files and photos that are safely in the cloud (they
+// download again when needed). In "download everything" mode only archived projects are cleared.
+// Never touches anything that hasn't finished uploading. Returns the number of files cleared.
+export async function freeUpSpace() {
+  const db = data.syncDb;
+  const mode = fileMode();
+  const archived = new Set((await db.projects.toArray()).filter((p) => p.archivedAt).map((p) => p.id));
+  const clearable = (r) => mode === 'open' || archived.has(r.projectId);
+  let cleared = 0;
+  await data.syncTransaction(['files', 'photos'], async (tx) => {
+    await tx.table('files').toCollection().modify((f) => {
+      if (f.blob && f.storagePath && !f.dirty && clearable(f)) { f.blob = null; cleared++; }
+    });
+    await tx.table('photos').toCollection().modify((p) => {
+      if (!clearable(p) || p.dirty) return;
+      if (p.originalBlob && p.originalPath) { p.originalBlob = null; cleared++; }
+      if (p.annotatedBlob && p.annotatedPath) { p.annotatedBlob = null; cleared++; }
+    });
+  });
+  return cleared;
+}
+
+// How much the app is storing on this device, e.g. "340 MB" (null if the browser won't say).
+export async function storageUsed() {
+  try {
+    const { usage } = await navigator.storage.estimate();
+    if (usage == null) return null;
+    return usage < 1024 * 1024 ? `${Math.round(usage / 1024)} KB` : `${(usage / 1024 / 1024).toFixed(usage < 100 * 1024 * 1024 ? 1 : 0)} MB`;
+  } catch { return null; }
+}
+
+// ---------- Safari-safe saving of files ----------
+// Safari sometimes refuses to save a downloaded file, or to re-save a record that already holds
+// one ("Error preparing Blob/File data to be stored in object store"). Copying the bytes into a
+// brand-new Blob first fixes it; writes that hit the error are retried that way once.
+
+const isBlobError = (err) => /blob|object store|preparing/i.test(err?.message || '');
+
+async function freshBlob(blob, type) {
+  return new Blob([await blob.arrayBuffer()], { type: type || blob.type || 'application/octet-stream' });
+}
+
+// Re-copies every file held by these records (a file that can't be read any more is dropped,
+// and downloads again later if it's in the cloud).
+async function freshenRecords(table, ids) {
+  const fields = (BLOB_FIELDS[table] || []).map(([f]) => f);
+  if (!fields.length) return;
+  for (const id of ids) {
+    const r = await data.syncDb.table(table).get(id);
+    if (!r) continue;
+    const patch = {};
+    for (const f of fields) {
+      if (!r[f]) continue;
+      try { patch[f] = await freshBlob(r[f]); } catch { patch[f] = null; }
+    }
+    if (Object.keys(patch).length) await data.syncTransaction([table], (tx) => tx.table(table).update(id, patch));
+  }
+}
+
+async function safeWrite(table, ids, op) {
+  try {
+    return await op();
+  } catch (err) {
+    if (!isBlobError(err) || !BLOB_FIELDS[table]) throw err;
+    console.warn('Safari file-saving hiccup; retrying', table, err);
+    await freshenRecords(table, ids);
+    return op();
+  }
+}
+
+// Downloads one file from the cloud and keeps it on the device. Used by screens (via db.js) in
+// "only what I open" mode, and by the background download in "download everything" mode.
+async function fetchBlob(table, record, field) {
+  const pathField = BLOB_FIELDS[table].find(([f]) => f === field)[1];
+  const path = record[pathField];
+  if (!path) return null;
+  const client = await cloud.getClient();
+  const { data: blob, error } = await client.storage.from(BUCKET).download(path);
+  if (error) throw new Error(error.message || 'Download failed');
+  const type = table === 'files' ? (record.type || blob.type) : 'image/jpeg';
+  const fresh = await freshBlob(blob, type);
+  await safeWrite(table, [record.id], () => data.syncTransaction([table], (tx) => tx.table(table).update(record.id, {
+    [field]: fresh, ...(field === 'annotatedBlob' ? { annotatedStale: 0 } : {}),
+  })));
+  return fresh;
+}
+
 // ---------- Status (shown on the Projects screen) ----------
 
 let status = { state: 'idle', message: '', lastSyncedAt: null, pending: 0 };
@@ -95,6 +200,7 @@ let started = false;
 export function startSync() {
   if (started) return;
   started = true;
+  data.setBlobFetcher(fetchBlob);
   data.onLocalChange(() => {
     clearTimeout(soonTimer);
     soonTimer = setTimeout(() => syncNow(), 3000);
@@ -165,7 +271,7 @@ async function runOnce() {
       return;
     }
     setStatus({ state: 'idle', message: '', lastSyncedAt: new Date().toISOString(), pending });
-    await downloadFiles(ctx); // can take a while; the lists are already up to date
+    await downloadFiles(); // can take a while; the lists are already up to date
   } catch (err) {
     console.error('Sync failed', err);
     const offline = /fetch|network|load failed/i.test(err.message || '');
@@ -278,7 +384,7 @@ async function uploadBlobs(ctx, table, r) {
   }
   if (Object.keys(paths).length) {
     // Save the paths without counting as a new edit (it's still dirty: the row itself goes up next).
-    await data.syncTransaction([table], (tx) => tx.table(table).update(r.id, paths));
+    await safeWrite(table, [r.id], () => data.syncTransaction([table], (tx) => tx.table(table).update(r.id, paths)));
     Object.assign(r, paths);
   }
   return true;
@@ -286,12 +392,12 @@ async function uploadBlobs(ctx, table, r) {
 
 // Marks a record uploaded — unless it changed again while uploading (then it stays dirty).
 async function markClean(table, r, extra = {}) {
-  await data.syncTransaction([table], async (tx) => {
+  await safeWrite(table, [r.id], () => data.syncTransaction([table], async (tx) => {
     const now = await tx.table(table).get(r.id);
     if (!now) return;
     const changed = now.updatedAt !== r.updatedAt;
     await tx.table(table).update(r.id, changed ? extra : { ...extra, dirty: 0 });
-  });
+  }));
 }
 
 // The cloud refused this change (no permission, e.g. a viewer edited, or an editor tried to delete
@@ -350,7 +456,7 @@ async function download(ctx) {
 // kept (unless cloudWins). Returns true if anything on the device changed.
 async function merge(table, rows, cloudWins, extra = {}) {
   let changedAny = false;
-  await data.syncTransaction([table], async (tx) => {
+  await safeWrite(table, rows.map((r) => r.id), () => data.syncTransaction([table], async (tx) => {
     const store = tx.table(table);
     for (const row of rows) {
       const incoming = MAP[table].down(row);
@@ -362,42 +468,42 @@ async function merge(table, rows, cloudWins, extra = {}) {
       const merged = { ...(local || {}), ...incoming, ...extra, cloud: 1, dirty: 0 };
       if (table === 'photos' && local && local.annotatedPath && incoming.updatedAt !== local.updatedAt) {
         merged.annotatedStale = 1; // the markup changed elsewhere: fetch the new marked-up photo
+        if (fileMode() === 'open') merged.annotatedBlob = null; // fetched again when opened
       }
       if (merged.deletedAt && GONE[table]) Object.assign(merged, GONE[table]);
       await store.put(merged);
       changedAny = true;
     }
-  });
+  }));
   return changedAny;
 }
 
-// Downloads drawing files and photos the device doesn't have yet (sheets first, they're needed to
-// show the drawing). Each one lands as soon as it's done, so screens can fill in.
-async function downloadFiles(ctx) {
+// "Download everything" mode: fetches drawing files and photos the device doesn't have yet
+// (sheets first, they're needed to show the drawing; archived projects are skipped). Each one
+// lands as soon as it's done, so screens can fill in. "Only what I open" mode skips this.
+async function downloadFiles() {
+  if (fileMode() !== 'all') return;
   const db = data.syncDb;
-  const store = ctx.client.storage.from(BUCKET);
+  const archived = new Set((await db.projects.toArray()).filter((p) => p.archivedAt || p.deletedAt).map((p) => p.id));
   const jobs = [];
   for (const f of await db.files.toArray()) {
-    if (!f.deletedAt && f.storagePath && !f.blob) jobs.push(['files', f, 'blob', 'storagePath', f.type]);
+    if (!f.deletedAt && !archived.has(f.projectId) && f.storagePath && !f.blob) jobs.push(['files', f, 'blob']);
   }
   for (const p of await db.photos.toArray()) {
-    if (p.deletedAt) continue;
-    if (p.originalPath && !p.originalBlob) jobs.push(['photos', p, 'originalBlob', 'originalPath', 'image/jpeg']);
-    if (p.annotatedPath && (!p.annotatedBlob || p.annotatedStale)) jobs.push(['photos', p, 'annotatedBlob', 'annotatedPath', 'image/jpeg']);
+    if (p.deletedAt || archived.has(p.projectId)) continue;
+    if (p.originalPath && !p.originalBlob) jobs.push(['photos', p, 'originalBlob']);
+    if (p.annotatedPath && (!p.annotatedBlob || p.annotatedStale)) jobs.push(['photos', p, 'annotatedBlob']);
   }
   let done = 0;
-  for (const [table, r, blobField, pathField, type] of jobs) {
+  for (const [table, r, field] of jobs) {
     setStatus({ message: `Downloading drawings and photos (${++done} of ${jobs.length})…` });
-    const { data: blob, error } = await store.download(r[pathField]);
-    if (error) {
-      if (isNetwork(error)) break;
-      console.warn('Download failed', table, r.id, error);
+    try {
+      await fetchBlob(table, { ...r, [field]: null }, field);
+    } catch (err) {
+      if (isNetwork(err)) break;
+      console.warn('Download failed', table, r.id, err);
       continue;
     }
-    const typed = blob.type ? blob : new Blob([blob], { type });
-    await data.syncTransaction([table], (tx) => tx.table(table).update(r.id, {
-      [blobField]: typed, ...(blobField === 'annotatedBlob' ? { annotatedStale: 0 } : {}),
-    }));
     announce(new Set([r.projectId]));
   }
   setStatus({ message: '' });

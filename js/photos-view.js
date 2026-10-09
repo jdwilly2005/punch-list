@@ -75,13 +75,20 @@ export function createPhotosView({ ctx, onOpenItem }) {
     const shown = items.filter((i) => matches(i, filter)).sort(compareItems);
     const withPhotos = shown.filter((i) => byItem.has(i.id));
     const without = shown.filter((i) => !byItem.has(i.id));
-    current = withPhotos.map((item) => ({ item, files: byItem.get(item.id).map((p, n) => fileFor(item, p, n + 1)) }));
+    // (Synced photos that couldn't download — no signal — are left out and counted below.)
+    const missing = photos.filter((p) => !p.originalBlob && !p.annotatedBlob).length;
+    current = withPhotos.map((item) => ({
+      item,
+      files: byItem.get(item.id).filter((p) => p.originalBlob || p.annotatedBlob).map((p, n) => fileFor(item, p, n + 1)),
+    })).filter((c) => c.files.length);
     const photoCount = current.reduce((sum, c) => sum + c.files.length, 0);
 
     zipBtn.disabled = photoCount === 0;
     summary.replaceChildren(
-      el('span', {}, `${photoCount} photo${photoCount === 1 ? '' : 's'} on ${withPhotos.length} item${withPhotos.length === 1 ? '' : 's'}`),
-      el('span', { class: 'summary-tip' }, 'Download, then drag the files from your Downloads folder into Procore'));
+      el('span', {}, `${photoCount} photo${photoCount === 1 ? '' : 's'} on ${current.length} item${current.length === 1 ? '' : 's'}`),
+      missing
+        ? el('span', { class: 'summary-tip' }, `${missing} photo${missing === 1 ? '' : 's'} not downloaded yet (needs signal)`)
+        : el('span', { class: 'summary-tip' }, 'Download, then drag the files from your Downloads folder into Procore'));
 
     cards.replaceChildren(...[
       ...current.map(({ item, files }) => makeCard(item, files)),

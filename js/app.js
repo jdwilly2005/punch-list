@@ -12,7 +12,7 @@ import { renderProject } from './project-screen.js';
 import { shareProject, backUpEverything, pickAndImport, lastBackupDate } from './backup.js';
 import { openAccountDialog } from './account.js';
 import { currentUser, takeEmailLink, useEmailLink } from './cloud.js';
-import { startSync, syncNow, onSyncStatus } from './sync.js';
+import { startSync, syncNow, onSyncStatus, fileMode, setFileMode, freeUpSpace, storageUsed } from './sync.js';
 
 const app = document.getElementById('app');
 let cleanup = null;
@@ -107,8 +107,43 @@ async function renderHome(token) {
 
   app.replaceChildren(
     el('header', { class: 'topbar topbar-home' }, brandLink({ showName: true }), accountButton()),
-    el('main', { class: 'scroll' }, el('h2', { class: 'section-title' }, 'Projects'), syncLine, form, list, archive, backup,
+    el('main', { class: 'scroll' }, el('h2', { class: 'section-title' }, 'Projects'), syncLine, form, list, archive, backup, deviceSection(),
       el('p', { class: 'app-version' }, `Version ${APP_VERSION}`)));
+}
+
+// "This device": keep all photos & drawings here, or only what you open; storage used; free up space.
+function deviceSection() {
+  const mode = el('select', { class: 'device-mode', 'aria-label': 'Photos and drawings on this device' },
+    el('option', { value: 'all' }, 'Download everything (works without signal)'),
+    el('option', { value: 'open' }, 'Only what I open (saves space)'));
+  mode.value = fileMode();
+  const used = el('span', {});
+  const refreshUsed = () => storageUsed().then((u) => { used.textContent = u ? `Punch List is using about ${u} on this device.` : ''; });
+  refreshUsed();
+  mode.addEventListener('change', () => {
+    setFileMode(mode.value);
+    toast(mode.value === 'all' ? 'Downloading photos and drawings in the background' : 'Photos and drawings will download when you open them');
+  });
+  const free = el('button', { type: 'button', class: 'btn' }, 'Free up space');
+  free.addEventListener('click', async () => {
+    const all = fileMode() === 'open';
+    const ok = await choose({
+      title: 'Free up space?',
+      message: all
+        ? 'Removes this device\'s copies of photos and drawings that are safely in the cloud. They download again when you open them (needs signal).'
+        : 'Removes this device\'s copies of photos and drawings for ARCHIVED projects that are safely in the cloud. Active projects keep theirs so they work without signal.',
+      choices: [{ label: 'Free up space', value: 'yes', kind: 'primary' }],
+    });
+    if (ok !== 'yes') return;
+    const n = await freeUpSpace();
+    toast(n ? `Cleared ${n} file${n === 1 ? '' : 's'} from this device` : 'Nothing to clear: everything here is still needed or not uploaded yet', 4000);
+    setTimeout(refreshUsed, 1500);
+  });
+  return el('section', { class: 'backup-tools' },
+    el('h2', { class: 'section-title' }, 'This device'),
+    el('label', { class: 'field' }, el('span', { class: 'field-label' }, 'Photos and drawings from the cloud'), mode),
+    el('div', { class: 'backup-buttons' }, free),
+    el('p', { class: 'backup-note' }, used, ' Phones and tablets usually keep everything (for no-signal areas); a computer can save space with "Only what I open". Your item lists always sync in full.'));
 }
 
 // One line under "Projects" saying whether everything is in the cloud.

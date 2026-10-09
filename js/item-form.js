@@ -5,6 +5,9 @@ import { el, toast, statusKey, choose } from './ui.js';
 import { preparePhoto, openMarkup } from './photo-markup.js';
 import { createTradeChips } from './trade-picker.js';
 
+// Gray "photo not downloaded yet" tile (synced photo opened with no signal).
+const OFFLINE_THUMB = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#dde1e6"/><text x="50" y="47" font-family="sans-serif" font-size="11" text-anchor="middle" fill="#5f6b7a">Not</text><text x="50" y="61" font-family="sans-serif" font-size="11" text-anchor="middle" fill="#5f6b7a">downloaded</text></svg>')}`;
+
 // item: an existing punch item, or for a new one { projectId, drawingId, x, y }
 // (drawingId/x/y null = a list-only item with no pin). drawing: its sheet, or null.
 // onClose(result) is called with { saved } / { deleted } / null (cancelled).
@@ -68,7 +71,9 @@ export async function openItemForm({ project, drawing, item, onClose, onTradesCh
     if (added.length === 1) editPhoto(added[0]);
   });
 
+  // A synced photo not downloaded yet (no signal) has no image: show a placeholder.
   function thumbUrl(p) {
+    if (!p.annotatedBlob && !p.originalBlob) return OFFLINE_THUMB;
     if (!p.url) {
       p.url = URL.createObjectURL(p.annotatedBlob || p.originalBlob);
       objectUrls.push(p.url);
@@ -77,6 +82,10 @@ export async function openItemForm({ project, drawing, item, onClose, onTradesCh
   }
 
   async function editPhoto(p) {
+    if (!p.originalBlob) {
+      toast('This photo hasn\'t downloaded yet. It needs signal; try again in a moment.');
+      return;
+    }
     const result = await openMarkup(p.originalBlob, p.markup || []);
     if (!result) return;
     p.markup = result.markup;

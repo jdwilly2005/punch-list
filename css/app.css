@@ -550,3 +550,4 @@ tr.saved td { animation: saved 1.2s ease-out; }
 .sync-line[data-state=error] .sync-dot { background: var(--danger); }
 .sync-line[data-state=error] { color: var(--danger); }
 .sync-line .link-btn { padding: 0; }
+.device-mode { width: 100%; }

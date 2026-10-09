@@ -259,9 +259,40 @@ export async function deleteDrawing(id, { keepItems }) {
   });
 }
 
+// ---------- Files and photos that are only in the cloud ----------
+// On a device set to "only what I open" (sync.js), synced drawing files and photos aren't
+// downloaded ahead of time. sync.js registers a fetcher; these accessors use it to download a
+// missing file the moment a screen needs it (it's then kept on the device until "Free up space").
+let blobFetcher = null;
+export function setBlobFetcher(fn) { blobFetcher = fn; }
+
+async function fetchMissing(table, record, field) {
+  if (!blobFetcher || record[field]) return record[field] || null;
+  try {
+    return (await blobFetcher(table, record, field)) || null;
+  } catch (err) {
+    console.warn('Could not download', table, record.id, field, err);
+    return null;
+  }
+}
+
+// Fills in photos' missing original / marked-up images from the cloud (a few at a time).
+async function withPhotoBlobs(photos) {
+  const jobs = [];
+  for (const p of photos) {
+    if (!p.originalBlob && p.originalPath) jobs.push([p, 'originalBlob']);
+    if (!p.annotatedBlob && p.annotatedPath) jobs.push([p, 'annotatedBlob']);
+  }
+  for (let i = 0; i < jobs.length; i += 4) {
+    await Promise.all(jobs.slice(i, i + 4).map(async ([p, field]) => { p[field] = await fetchMissing('photos', p, field); }));
+  }
+  return photos;
+}
+
 export async function getFileBlob(fileId) {
   const f = await db.files.get(fileId);
-  return f ? f.blob : null;
+  if (!f) return null;
+  return f.blob || (f.storagePath ? fetchMissing('files', f, 'blob') : null);
 }
 
 // ---------- Item numbers and tags ----------
@@ -400,14 +431,16 @@ export async function deleteItem(id) {
 
 // ---------- Photos ----------
 
+// Photo lists download any images that are only in the cloud (needs signal; without it those
+// photos come back with no image, and screens show a placeholder).
 export async function listPhotos(itemId) {
   const all = (await db.photos.where('itemId').equals(itemId).toArray()).filter(alive);
-  return all.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  return withPhotoBlobs(all.sort((a, b) => a.createdAt.localeCompare(b.createdAt)));
 }
 
 export async function listProjectPhotos(projectId) {
   const all = (await db.photos.where('projectId').equals(projectId).toArray()).filter(alive);
-  return all.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  return withPhotoBlobs(all.sort((a, b) => a.createdAt.localeCompare(b.createdAt)));
 }
 
 // ---------- Whole projects (for the backup / share file, see backup.js) ----------
@@ -419,7 +452,10 @@ export async function readProjectBundle(projectId) {
   const [project, files, drawings, items, photos] = await Promise.all([
     getProject(projectId), of(db.files), of(db.drawings), of(db.items), of(db.photos),
   ]);
-  return project && { project, files, drawings, items, photos };
+  if (!project) return null;
+  for (const f of files) if (!f.blob && f.storagePath) f.blob = await fetchMissing('files', f, 'blob');
+  await withPhotoBlobs(photos);
+  return { project, files, drawings, items, photos };
 }
 
 // The last time anything in the project changed (an item, a sheet, a photo...).
