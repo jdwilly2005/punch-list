@@ -91,7 +91,7 @@ async function renderHome(token) {
       projects.length ? (last ? `Last full backup from this device: ${last}.` : 'No full backup from this device yet.') : null));
 
   app.replaceChildren(
-    el('header', { class: 'topbar' }, brandLink({ showName: true })),
+    el('header', { class: 'topbar topbar-home' }, brandLink({ showName: true })),
     el('main', { class: 'scroll' }, el('h2', { class: 'section-title' }, 'Projects'), form, list, archive, backup,
       el('p', { class: 'app-version' }, `Version ${APP_VERSION}`)));
 }
