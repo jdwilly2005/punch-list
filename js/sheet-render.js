@@ -17,6 +17,15 @@ export function getPdf(fileId, blob) {
   return openDocs.get(fileId);
 }
 
+// Closes every PDF open right now (when leaving a project), so its memory is given back. They're
+// forgotten immediately (the next screen opens its own) and destroyed a moment later, once the old
+// screen's renders have stopped.
+export function closeAllPdfs() {
+  const closing = [...openDocs.values()];
+  openDocs.clear();
+  setTimeout(() => { for (const p of closing) p.then((doc) => doc.destroy()).catch(() => {}); }, 600);
+}
+
 // Page count and size of every page, used when a PDF is first imported.
 export async function readPdfPages(blob) {
   const doc = await openPdf(blob);

@@ -6,7 +6,7 @@
 
 import * as data from './db.js';
 import { el, toast, busy, statusKey, brandLink, choose } from './ui.js';
-import { readPdfPages, readImageSize } from './sheet-render.js';
+import { readPdfPages, readImageSize, closeAllPdfs } from './sheet-render.js';
 import { DrawingView } from './drawing-view.js';
 import { openItemForm } from './item-form.js';
 import { openTradeManager, resolveTrade } from './trades.js';
@@ -584,5 +584,6 @@ export async function renderProject(app, projectId, initialTab, isStale) {
     clearInterval(catchUp);
     view.destroy();
     photos.destroy();
+    closeAllPdfs(); // give the PDFs' memory back
   };
 }

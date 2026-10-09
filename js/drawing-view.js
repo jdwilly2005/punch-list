@@ -16,12 +16,18 @@ import { el, statusKey } from './ui.js';
 import { itemRef } from './db.js';
 import { getPdf } from './sheet-render.js';
 
-// Base render is capped so big sheets stay within phone memory limits (iOS caps
-// a single canvas at ~16.7M pixels).
-const MAX_BASE_PIXELS = 10_000_000;
+// Memory: iPhone Safari kills the page ("A problem repeatedly occurred") if canvases use too much,
+// so phones/tablets get smaller limits than computers.
+const TOUCH = window.matchMedia('(pointer: coarse)').matches;
+// Base render (the whole sheet) is capped so big sheets stay within memory limits.
+const MAX_BASE_PIXELS = TOUCH ? 6_000_000 : 10_000_000;
 const MAX_BASE_SCALE = 4;
 // When zoomed in, the visible area is re-rendered sharp at screen resolution (capped for memory).
-const MAX_DETAIL_PIXELS = 8_000_000;
+const MAX_DETAIL_PIXELS = TOUCH ? 4_000_000 : 8_000_000;
+// Re-render no finer than 2 device pixels per screen point: 3x phones look the same, at less than half the memory.
+const MAX_DPR = 2;
+// Wait this long after the last zoom/pan before re-rendering sharp.
+const DETAIL_DELAY_MS = 250;
 const TAP_SLOP = 8; // px a finger can wiggle and still count as a tap / long-press
 const LONG_PRESS_MS = 500; // hold this long to drop a pin
 const GROUP_DIST = 26; // px on screen: pins closer than this overlap, so they're shown as one "+N" pin
@@ -146,6 +152,9 @@ export class DrawingView {
     if (this.detailTask) this.detailTask.cancel();
     this.baseTask = this.detailTask = null;
     this.detailToken++;
+    // Let pdf.js drop this page's decoded images etc. (after the cancels above have landed).
+    const page = this.page;
+    if (page) setTimeout(() => { try { page.cleanup(); } catch { /* still busy: freed later */ } }, 500);
     this.page = null;
     this.img = null;
     clearTimeout(this.detailTimer);
@@ -454,14 +463,25 @@ export class DrawingView {
 
   // ---------- Sharp re-render when zoomed in ----------
 
+  // Called on every zoom / pan step. Stops any sharp re-render in progress right away (so fast
+  // zooming never piles renders up) and starts a new one once things have been still for a moment.
   scheduleDetail() {
     clearTimeout(this.detailTimer);
-    this.detailTimer = setTimeout(() => this.renderDetail(), 150);
+    if (this.detailTask) {
+      this.detailToken++;
+      this.detailTask.cancel();
+      this.detailTask = null;
+    }
+    this.detailTimer = setTimeout(() => this.renderDetail(), DETAIL_DELAY_MS);
   }
 
   // Re-draws the visible part of the sheet at screen resolution, in the detail layer.
   async renderDetail() {
     if (!this.ready || (!this.page && !this.img)) return;
+    // Fingers still on the screen (mid-pinch): wait until they lift.
+    if (this.pointers.size > 0) { this.scheduleDetail(); return; }
+    // Only one render at a time: if the previous one is still winding down, try again shortly.
+    if (this.detailBusy) { this.scheduleDetail(); return; }
     // At the starting "fit" view (or zoomed out) the base picture is already sharp enough.
     if (this.s <= this.fitScale * 1.05) {
       this.detailToken++;
@@ -470,7 +490,7 @@ export class DrawingView {
       this.removeDetail();
       return;
     }
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
     const wanted = this.s * dpr; // device pixels per drawing unit
     const r = this.stage.getBoundingClientRect();
     const x0 = Math.max(0, -this.tx / this.s);
@@ -485,6 +505,15 @@ export class DrawingView {
     const token = ++this.detailToken;
     if (this.detailTask) this.detailTask.cancel();
     this.detailTask = null;
+    this.detailBusy = true;
+    try {
+      await this.drawDetail(token, x0, y0, x1, y1, scale, view);
+    } finally {
+      this.detailBusy = false;
+    }
+  }
+
+  async drawDetail(token, x0, y0, x1, y1, scale, view) {
     const canvas = document.createElement('canvas');
     canvas.width = Math.ceil((x1 - x0) * scale);
     canvas.height = Math.ceil((y1 - y0) * scale);
