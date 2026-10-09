@@ -83,6 +83,19 @@ export class DrawingView {
 
   // ---------- Showing a sheet ----------
 
+  // A synced sheet whose drawing file hasn't downloaded yet: blank sheet + "Loading sheet…".
+  showWaiting(drawing) {
+    ++this.token;
+    this.ready = false;
+    this.clearSheet();
+    this.W = drawing.widthPx;
+    this.H = drawing.heightPx;
+    this.world.style.width = `${this.W}px`;
+    this.world.style.height = `${this.H}px`;
+    this.fit();
+    this.stage.classList.add('loading');
+  }
+
   async show(drawing, blob) {
     const token = ++this.token;
     this.ready = false;

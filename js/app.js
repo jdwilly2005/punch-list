@@ -12,14 +12,24 @@ import { renderProject } from './project-screen.js';
 import { shareProject, backUpEverything, pickAndImport, lastBackupDate } from './backup.js';
 import { openAccountDialog } from './account.js';
 import { currentUser, takeEmailLink, useEmailLink } from './cloud.js';
+import { startSync, syncNow, onSyncStatus } from './sync.js';
 
 const app = document.getElementById('app');
 let cleanup = null;
 let renderToken = 0;
+let stopStatus = null; // the Projects screen's sync-status subscription
+
+// After signing in or out: sync right away and redraw.
+function accountChanged() {
+  syncNow();
+  route();
+}
 
 function route() {
   if (cleanup) cleanup();
   cleanup = null;
+  if (stopStatus) stopStatus();
+  stopStatus = null;
   const token = ++renderToken;
   const isStale = () => token !== renderToken;
   const m = location.hash.match(/^#\/p\/([\w-]+)(?:\/(list|photos))?/);
@@ -92,17 +102,51 @@ async function renderHome(token) {
       'To send one project to someone, use its ⋯ menu › Share project file. ',
       projects.length ? (last ? `Last full backup from this device: ${last}.` : 'No full backup from this device yet.') : null));
 
+  const syncLine = el('p', { class: 'sync-line', role: 'status' });
+  stopStatus = onSyncStatus((st) => showSyncStatus(syncLine, st));
+
   app.replaceChildren(
     el('header', { class: 'topbar topbar-home' }, brandLink({ showName: true }), accountButton()),
-    el('main', { class: 'scroll' }, el('h2', { class: 'section-title' }, 'Projects'), form, list, archive, backup,
+    el('main', { class: 'scroll' }, el('h2', { class: 'section-title' }, 'Projects'), syncLine, form, list, archive, backup,
       el('p', { class: 'app-version' }, `Version ${APP_VERSION}`)));
 }
+
+// One line under "Projects" saying whether everything is in the cloud.
+function showSyncStatus(node, st) {
+  const plural = (n) => `${n} change${n === 1 ? '' : 's'}`;
+  let text;
+  let kind = st.state;
+  let retry = false;
+  if (st.state === 'signed-out') {
+    text = 'Saved on this device only. Sign in (top right) to sync your projects to the cloud.';
+  } else if (st.state === 'offline') {
+    text = st.pending ? `Offline: ${plural(st.pending)} will upload when you have signal.` : 'Offline: showing what\'s saved on this device.';
+  } else if (st.state === 'syncing') {
+    text = st.message || 'Syncing…';
+  } else if (st.state === 'error') {
+    text = `Sync problem: ${st.message}`;
+    retry = true;
+  } else {
+    text = st.message || (st.pending ? `${plural(st.pending)} waiting to upload.` : 'All projects synced to the cloud.');
+    kind = st.message ? 'syncing' : 'idle';
+  }
+  node.dataset.state = kind;
+  node.replaceChildren(...[el('span', { class: 'sync-dot', 'aria-hidden': 'true' }), el('span', {}, text),
+    retry ? el('button', { type: 'button', class: 'link-btn dark', onclick: () => syncNow() }, 'Try again') : null].filter(Boolean));
+}
+
+// Redraw the Projects screen when downloads bring new or changed projects (not while a dialog is open).
+window.addEventListener('punchlist:remote-change', () => {
+  if (location.hash.startsWith('#/p/')) return; // the project screen handles its own
+  if (document.querySelector('.pl-layer, .pl-working')) return;
+  route();
+});
 
 // Top-right account button: a person icon, or the first letter of the email once signed in.
 function accountButton() {
   const btn = el('button', {
     type: 'button', class: 'account-btn', 'aria-label': 'Account – sign in',
-    onclick: () => openAccountDialog({ onChange: route }),
+    onclick: () => openAccountDialog({ onChange: accountChanged }),
   }, el('span', { class: 'account-icon', 'aria-hidden': 'true' }));
   currentUser().then((user) => {
     if (!user) return;
@@ -182,16 +226,17 @@ window.addEventListener('unhandledrejection', (e) => {
 const emailLink = takeEmailLink();
 window.addEventListener('hashchange', route);
 route();
+startSync();
 if (emailLink) handleEmailLink(emailLink);
 
 async function handleEmailLink(params) {
   try {
     const type = await useEmailLink(params);
     if (type === 'recovery') {
-      openAccountDialog({ start: 'newpass', onChange: route });
+      openAccountDialog({ start: 'newpass', onChange: accountChanged });
     } else {
       toast(type === 'signup' ? 'Email confirmed. You\'re signed in.' : 'You\'re signed in.', 4000);
-      route();
+      accountChanged();
     }
   } catch (err) {
     console.error(err);

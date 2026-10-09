@@ -29,6 +29,46 @@ db.version(2).stores({}).upgrade((tx) => tx.table('items').toCollection().modify
   delete item.trade;
 }));
 
+// v3 (cloud sync): every record carries `dirty` (1 = changed on this device, not uploaded yet).
+// Existing records are all marked dirty, so they upload the first time someone signs in.
+// `syncState` keeps, per project, how far this device has downloaded ("cursor").
+const SYNCED_TABLES = ['projects', 'files', 'drawings', 'items', 'photos'];
+db.version(3).stores({
+  projects: 'id, updatedAt, dirty',
+  files: 'id, projectId, dirty',
+  drawings: 'id, projectId, updatedAt, dirty',
+  items: 'id, projectId, drawingId, updatedAt, dirty',
+  photos: 'id, itemId, projectId, updatedAt, dirty',
+  syncState: 'projectId',
+}).upgrade(async (tx) => {
+  for (const name of SYNCED_TABLES) await tx.table(name).toCollection().modify({ dirty: 1 });
+});
+
+// Any change made in the app marks the record dirty and tells sync.js (after a short pause).
+// Changes written BY sync (downloads, "uploaded" marks) run in a transaction flagged `fromSync`,
+// so they don't count as new local changes.
+let localChangeListener = () => {};
+export function onLocalChange(fn) { localChangeListener = fn; }
+for (const name of SYNCED_TABLES) {
+  db.table(name).hook('creating', (_key, obj, tx) => {
+    if (!tx.fromSync) { obj.dirty = 1; tx.on('complete', () => localChangeListener()); }
+  });
+  db.table(name).hook('updating', (mods, _key, _obj, tx) => {
+    if (tx.fromSync) return undefined;
+    tx.on('complete', () => localChangeListener());
+    return { dirty: 1 };
+  });
+}
+
+// Runs fn inside a write transaction whose changes are NOT treated as local edits (for sync.js).
+export function syncTransaction(tables, fn) {
+  return db.transaction('rw', tables.map((t) => db.table(t)), async (tx) => {
+    tx.fromSync = true;
+    return fn(tx);
+  });
+}
+export const syncDb = db; // sync.js reads tables directly
+
 export const STATUSES = ['Open', 'In Progress', 'Ready for Review', 'Closed'];
 
 // Placeholder until there are real user accounts.
@@ -397,6 +437,12 @@ export async function projectLastChanged(projectId) {
 //   asCopy: true  -> saves it as a separate project with fresh ids, named `name`.
 export async function writeProjectBundle(bundle, { asCopy = false, name } = {}) {
   const b = asCopy ? copyBundle(bundle, name) : bundle;
+  // Sync bookkeeping from the device the file came from doesn't apply here: these records upload
+  // fresh from this device (and a copy has new ids, so its files/photos must upload again too).
+  const SYNC_FIELDS = ['dirty', 'cloud', 'syncUser', 'annotatedStale', ...(asCopy ? ['storagePath', 'originalPath', 'annotatedPath'] : [])];
+  const strip = (r) => { const c = { ...r }; for (const f of SYNC_FIELDS) delete c[f]; return c; };
+  b.project = strip(b.project);
+  for (const key of ['files', 'drawings', 'items', 'photos']) b[key] = b[key].map(strip);
   const projectId = b.project.id;
   const tables = { files: db.files, drawings: db.drawings, items: db.items, photos: db.photos };
   const blobsGone = { files: { blob: null }, photos: BLOBS_GONE };

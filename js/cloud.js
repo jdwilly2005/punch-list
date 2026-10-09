@@ -42,6 +42,13 @@ export function getClient() {
   return clientPromise;
 }
 
+// True if someone has signed in on this device before (checked without loading the ~200 KB library).
+export function hasSavedSession() {
+  try {
+    return Object.keys(localStorage).some((k) => k.startsWith('sb-') && k.endsWith('-auth-token'));
+  } catch { return false; }
+}
+
 // The signed-in user ({ id, email, ... }) or null. Works offline: the session is saved on the device.
 export async function currentUser() {
   const client = await getClient();

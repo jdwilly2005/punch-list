@@ -51,6 +51,7 @@ export async function renderProject(app, projectId, initialTab, isStale) {
   let tab = initialTab;
   let current = null;        // sheet shown on the Drawing tab
   let drawingLoaded = false; // the Drawing tab loads its sheet the first time it's shown
+  let sheetWaiting = false;  // the shown sheet's drawing file hasn't downloaded yet
   let filter = loadFilter(projectId);
 
   // ---------- Top bar with Drawing | List tabs ----------
@@ -190,7 +191,13 @@ export async function renderProject(app, projectId, initialTab, isStale) {
     refreshPins();
     refreshFilterBar();
     try {
-      await view.show(current, await data.getFileBlob(current.fileId));
+      const blob = await data.getFileBlob(current.fileId);
+      sheetWaiting = !blob;
+      if (!blob) {
+        view.showWaiting(current); // still downloading from the cloud; shown when it lands
+        return;
+      }
+      await view.show(current, blob);
     } catch (err) {
       console.error(err);
       toast(`Could not display this sheet: ${err.message}`);
@@ -511,10 +518,35 @@ export async function renderProject(app, projectId, initialTab, isStale) {
     });
   }
 
+  // ---------- Changes downloaded from the cloud ----------
+  // Redraw with the new data — but not while a form or dialog is open (it would yank things away
+  // mid-edit); in that case catch up when it closes.
+  let remotePending = false;
+  async function onRemoteChange(e) {
+    if (!e.detail.projectIds.includes(projectId)) return;
+    if (document.querySelector('.pl-layer, .markup, .pl-working') || placing) {
+      remotePending = true;
+      return;
+    }
+    remotePending = false;
+    const stillHere = await data.getProject(projectId);
+    if (!stillHere) { location.hash = '#/'; return; }
+    drawings = await data.listDrawings(projectId);
+    await reloadData();
+    if (current && !drawings.some((d) => d.id === current.id)) current = null;
+    refreshSheets();
+    refreshAll();
+    if (tab === 'drawing' && drawings.length && (!current || sheetWaiting)) await showDrawing((current || drawings[0]).id);
+  }
+  window.addEventListener('punchlist:remote-change', onRemoteChange);
+  const catchUp = setInterval(() => { if (remotePending) onRemoteChange({ detail: { projectIds: [projectId] } }); }, 2000);
+
   // ---------- Start ----------
   refreshSheets();
   setTab(tab);
   return () => {
+    window.removeEventListener('punchlist:remote-change', onRemoteChange);
+    clearInterval(catchUp);
     view.destroy();
     photos.destroy();
   };

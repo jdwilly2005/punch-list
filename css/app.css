@@ -541,3 +541,12 @@ tr.saved td { animation: saved 1.2s ease-out; }
 .account-company { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; }
 .account-company strong { font-size: 17px; }
 .account-company .account-submit { margin-top: 8px; }
+/* Sync status line under "Projects" */
+.sync-line { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin: -4px 0 12px; font-size: 13px; color: var(--muted); line-height: 1.35; }
+.sync-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; background: #9aa3ae; }
+.sync-line[data-state=idle] .sync-dot { background: var(--st-closed); }
+.sync-line[data-state=syncing] .sync-dot { background: var(--st-review); animation: pulse 1s ease-in-out infinite alternate; }
+.sync-line[data-state=offline] .sync-dot { background: var(--st-progress); }
+.sync-line[data-state=error] .sync-dot { background: var(--danger); }
+.sync-line[data-state=error] { color: var(--danger); }
+.sync-line .link-btn { padding: 0; }
