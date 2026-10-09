@@ -463,15 +463,12 @@ export class DrawingView {
 
   // ---------- Sharp re-render when zoomed in ----------
 
-  // Called on every zoom / pan step. Stops any sharp re-render in progress right away (so fast
-  // zooming never piles renders up) and starts a new one once things have been still for a moment.
+  // Called on every zoom / pan step: re-render sharp once things have been still for a moment.
+  // A render already running is left to finish (cancelling pdf.js half-way leaves its scratch
+  // canvases for Safari to clean up "later", and rapid zooming piled those up into a crash);
+  // only one runs at a time, and the next one starts after it.
   scheduleDetail() {
     clearTimeout(this.detailTimer);
-    if (this.detailTask) {
-      this.detailToken++;
-      this.detailTask.cancel();
-      this.detailTask = null;
-    }
     this.detailTimer = setTimeout(() => this.renderDetail(), DETAIL_DELAY_MS);
   }
 
@@ -482,16 +479,16 @@ export class DrawingView {
     if (this.pointers.size > 0) { this.scheduleDetail(); return; }
     // Only one render at a time: if the previous one is still winding down, try again shortly.
     if (this.detailBusy) { this.scheduleDetail(); return; }
-    // At the starting "fit" view (or zoomed out) the base picture is already sharp enough.
-    if (this.s <= this.fitScale * 1.05) {
+    const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
+    const wanted = this.s * dpr; // device pixels per drawing unit
+    // Until you zoom in past what the base picture already holds, it's sharp enough: no extra
+    // render (this is what made zooming OUT expensive — it re-rendered the whole sheet).
+    const basePerUnit = this.page ? this.baseScale : (this.img ? this.img.naturalWidth / this.W : 1);
+    if (wanted <= basePerUnit * 1.25) {
       this.detailToken++;
-      if (this.detailTask) this.detailTask.cancel();
-      this.detailTask = null;
       this.removeDetail();
       return;
     }
-    const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
-    const wanted = this.s * dpr; // device pixels per drawing unit
     const r = this.stage.getBoundingClientRect();
     const x0 = Math.max(0, -this.tx / this.s);
     const y0 = Math.max(0, -this.ty / this.s);
@@ -502,9 +499,10 @@ export class DrawingView {
     const scale = wanted * Math.min(1, Math.sqrt(MAX_DETAIL_PIXELS / areaAtWanted));
     const view = { s: this.s, x0, y0 }; // the zoom this render was made for
 
+    // Already showing a sharp render made for this exact view? Nothing to do.
+    const v = this.detailView;
+    if (this.detailCanvas && v && v.s === this.s && v.x0 === x0 && v.y0 === y0) return;
     const token = ++this.detailToken;
-    if (this.detailTask) this.detailTask.cancel();
-    this.detailTask = null;
     this.detailBusy = true;
     try {
       await this.drawDetail(token, x0, y0, x1, y1, scale, view);
