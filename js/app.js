@@ -10,6 +10,8 @@ import * as data from './db.js';
 import { el, toast, brandLink, choose, APP_VERSION } from './ui.js';
 import { renderProject } from './project-screen.js';
 import { shareProject, backUpEverything, pickAndImport, lastBackupDate } from './backup.js';
+import { openAccountDialog } from './account.js';
+import { currentUser } from './cloud.js';
 
 const app = document.getElementById('app');
 let cleanup = null;
@@ -91,9 +93,24 @@ async function renderHome(token) {
       projects.length ? (last ? `Last full backup from this device: ${last}.` : 'No full backup from this device yet.') : null));
 
   app.replaceChildren(
-    el('header', { class: 'topbar topbar-home' }, brandLink({ showName: true })),
+    el('header', { class: 'topbar topbar-home' }, brandLink({ showName: true }), accountButton()),
     el('main', { class: 'scroll' }, el('h2', { class: 'section-title' }, 'Projects'), form, list, archive, backup,
       el('p', { class: 'app-version' }, `Version ${APP_VERSION}`)));
+}
+
+// Top-right account button: a person icon, or the first letter of the email once signed in.
+function accountButton() {
+  const btn = el('button', {
+    type: 'button', class: 'account-btn', 'aria-label': 'Account – sign in',
+    onclick: () => openAccountDialog({ onChange: route }),
+  }, el('span', { class: 'account-icon', 'aria-hidden': 'true' }));
+  currentUser().then((user) => {
+    if (!user) return;
+    btn.classList.add('signed-in');
+    btn.setAttribute('aria-label', `Account – signed in as ${user.email}`);
+    btn.firstChild.textContent = user.email[0].toUpperCase();
+  }).catch(() => { /* offline before the account code was ever loaded: keep the sign-in icon */ });
+  return btn;
 }
 
 // Import a .punchlist file. One project opens straight away; several redraw the list.

@@ -27,6 +27,7 @@
   --st-closed: #188038;
   --pin-group: #59636e;       /* "+N" pin for overlapping pins */
 
+  --person-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round'%3E%3Ccircle cx='12' cy='8' r='4'/%3E%3Cpath d='M4 21c0-4 3.6-7 8-7s8 3 8 7'/%3E%3C/svg%3E");
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
@@ -89,7 +90,27 @@ input.invalid { border-color: var(--danger); }
 .brand-back { font-size: 26px; font-weight: 400; line-height: 1; margin: -2px -2px 0 0; }
 .brand + h1 { margin-left: 4px; }
 /* Projects screen: logo + name centered, name in Oswald */
-.topbar-home { justify-content: center; }
+.topbar-home { justify-content: center; position: relative; }
+/* Account button, top-right of the Projects screen (absolute so the logo stays centered) */
+.account-btn {
+  position: absolute; right: 10px; bottom: 8px; width: 40px; height: 40px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  border: 1.5px solid rgba(255,255,255,.55); background: transparent; color: #fff; font: inherit; font-weight: 700; font-size: 17px;
+}
+.account-icon:empty {
+  width: 18px; height: 18px; display: block;
+  background: currentColor; -webkit-mask: var(--person-icon) center / contain no-repeat; mask: var(--person-icon) center / contain no-repeat;
+}
+.account-btn.signed-in { background: var(--accent); border-color: var(--accent); }
+.account-body { gap: 14px; }
+.account-form { display: flex; flex-direction: column; gap: 14px; }
+.account-input { font: inherit; font-size: 16px; width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); }
+.account-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.account-submit { width: 100%; min-height: 46px; }
+.account-links { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px; }
+.account-who { display: flex; flex-direction: column; gap: 4px; font-size: 17px; word-break: break-all; }
+.form-error { margin: 0; padding: 10px 12px; border-radius: 10px; background: #fdecea; color: #a1231b; font-size: 14px; line-height: 1.4; }
+.head-spacer { width: 64px; flex: 0 0 auto; }
 .topbar-home .brand-logo { width: 38px; height: 38px; border-radius: 9px; }
 .brand-name { font-family: 'Oswald', -apple-system, BlinkMacSystemFont, sans-serif; font-weight: 700; font-size: 27px; line-height: 1; letter-spacing: .01em; }
 @media (max-width: 479px) {

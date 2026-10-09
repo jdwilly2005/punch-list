@@ -9,7 +9,7 @@
 // When you add a new file to the app, also add it to APP_FILES.
 // On localhost the network is always used, so local testing never shows stale files.
 
-const VERSION = 'v21';
+const VERSION = 'v22';
 const CACHE = `punchlist-${VERSION}`;
 const APP_FILES = [
   './',
@@ -33,12 +33,15 @@ const APP_FILES = [
   'js/trade-picker.js',
   'js/report-pdf.js',
   'js/backup.js',
+  'js/cloud.js',
+  'js/account.js',
   'vendor/dexie.min.js',
   'vendor/pdf.min.mjs',
   'vendor/pdf.worker.min.mjs',
   'vendor/exceljs.min.js',
   'vendor/jszip.min.js',
   'vendor/pdf-lib.min.js',
+  'vendor/supabase.min.js',
   'templates/procore-punch-import.xlsx',
   'brand/logo.png',
   'fonts/oswald-700.woff2',
