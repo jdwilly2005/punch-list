@@ -183,18 +183,10 @@ input.invalid { border-color: var(--danger); }
   content: 'Loading sheet…'; position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
   background: rgba(0,0,0,.7); color: #fff; padding: 6px 12px; border-radius: 16px; font-size: 14px;
 }
-.world {
-  position: absolute; left: 0; top: 0; transform-origin: 0 0;
-  background: #fff; box-shadow: 0 2px 14px rgba(0,0,0,.25);
-}
-.sheet-layer > img, .sheet-layer > canvas {
-  position: absolute; left: 0; top: 0; width: 100%; height: 100%;
-  display: block; pointer-events: none;
-}
-/* Sharp layers on top of the zoomed sheet, in screen pixels (see drawing-view.js). */
-.detail-layer, .pin-layer { position: absolute; inset: 0; overflow: hidden; }
-.detail-layer { pointer-events: none; }
-.detail-layer > canvas { position: absolute; left: 0; top: 0; display: block; transform-origin: 0 0; }
+/* The sheet is painted onto one screen-sized canvas (never CSS-enlarged: see drawing-view.js);
+   the pins sit on top, in screen pixels. */
+.sheet-screen { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
+.pin-layer { position: absolute; inset: 0; overflow: hidden; }
 
 .stage-empty {
   position: absolute; inset: 0; display: flex; flex-direction: column;

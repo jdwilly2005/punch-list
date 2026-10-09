@@ -1,14 +1,16 @@
 // drawing-view.js — shows one sheet with pan/zoom and the pins on top of it.
 //
 // How positioning works:
-//   The sheet sits in a "world" box sized in the drawing's own units
-//   (PDF points or image pixels). Pan/zoom is one CSS transform on that box,
-//   which is fast but blurry when zoomed in (the browser enlarges a picture it
-//   made at the smaller size — very noticeable on iPhone/iPad). So two layers sit
-//   ON TOP of the world, in plain screen pixels, and are never enlarged:
-//     - detail layer: a sharp re-render of just the visible part of the sheet,
-//       made at screen resolution once a gesture settles;
-//     - pin layer: the pins, each moved to its spot on screen.
+//   The sheet is rendered ONCE into a "base" picture that is never put on the page. What you see
+//   is a screen-sized canvas: on every pan/zoom step the visible part of the base picture is
+//   copied onto it (drawScreen). Nothing on the page is ever enlarged with CSS: iPhone Safari
+//   re-paints enlarged things at the zoomed-in sharpness, and zooming OUT fast from deep zoom
+//   then made it paint the whole 42"x30" sheet at that sharpness — it ran out of memory and
+//   killed the page (v29–v31 crashes). Now memory stays the same at any zoom.
+//     - detail: once a gesture settles, the visible part is re-rendered sharp at screen
+//       resolution (also off the page) and copied on top of the base picture;
+//     - pin layer: the pins, each moved to its spot on screen (plain screen pixels).
+//   Drawing units = the drawing's own units (PDF points or image pixels).
 //   Pins are stored as fractions of the page (x, y from 0 to 1), so a pin at
 //   x=0.5, y=0.5 is always dead-center no matter the zoom or screen size.
 
@@ -47,12 +49,13 @@ export class DrawingView {
     this.onPinTap = onPinTap;
     this.onGroupTap = onGroupTap;
 
-    this.sheetLayer = el('div', { class: 'sheet-layer' });
-    this.world = el('div', { class: 'world' }, this.sheetLayer);
-    this.detailLayer = el('div', { class: 'detail-layer' }); // screen pixels (see top of file)
-    this.pinLayer = el('div', { class: 'pin-layer' });       // screen pixels
-    stage.append(this.world, this.detailLayer, this.pinLayer);
+    this.screen = el('canvas', { class: 'sheet-screen' }); // screen pixels (see top of file)
+    this.pinLayer = el('div', { class: 'pin-layer' });     // screen pixels
+    stage.append(this.screen, this.pinLayer);
+    this.base = null;         // the whole sheet: a canvas (PDF) or an <img>, never on the page
+    this.detailCanvas = null; // sharp render of the visible part, never on the page
     this.detailToken = 0;
+    this.screenDpr = 1;
 
     this.s = 1; this.tx = 0; this.ty = 0; this.W = 1; this.H = 1;
     this.fitScale = 1;
@@ -83,7 +86,11 @@ export class DrawingView {
       this.zoomAt(this.localPoint(e), (this.gestureScale0 * e.scale) / this.s);
     });
 
-    this.resizeObserver = new ResizeObserver(() => { if (!this.userMoved) this.fit(); });
+    this.resizeObserver = new ResizeObserver(() => {
+      this.sizeScreen();
+      if (!this.userMoved) this.fit();
+      else this.apply();
+    });
     this.resizeObserver.observe(stage);
   }
 
@@ -96,8 +103,6 @@ export class DrawingView {
     this.clearSheet();
     this.W = drawing.widthPx;
     this.H = drawing.heightPx;
-    this.world.style.width = `${this.W}px`;
-    this.world.style.height = `${this.H}px`;
     this.fit();
     this.stage.classList.add('loading');
   }
@@ -108,8 +113,6 @@ export class DrawingView {
     this.clearSheet();
     this.W = drawing.widthPx;
     this.H = drawing.heightPx;
-    this.world.style.width = `${this.W}px`;
-    this.world.style.height = `${this.H}px`;
     this.fit();
     this.stage.classList.add('loading');
     try {
@@ -124,9 +127,14 @@ export class DrawingView {
         canvas.width = Math.floor(vp.width);
         canvas.height = Math.floor(vp.height);
         this.baseTask = page.render({ canvasContext: canvas.getContext('2d'), viewport: vp });
-        await this.baseTask.promise;
-        if (token !== this.token) return;
-        this.sheetLayer.prepend(canvas);
+        try {
+          await this.baseTask.promise;
+        } catch (err) {
+          canvas.width = canvas.height = 0;
+          throw err;
+        }
+        if (token !== this.token) { canvas.width = canvas.height = 0; return; }
+        this.base = canvas;
       } else {
         this.objectUrl = URL.createObjectURL(blob);
         const img = new Image();
@@ -134,10 +142,11 @@ export class DrawingView {
         img.src = this.objectUrl;
         await img.decode();
         if (token !== this.token) return;
-        this.sheetLayer.prepend(img);
+        this.base = img;
         this.img = img;
       }
       this.ready = true;
+      this.drawScreen();
       this.scheduleDetail();
     } catch (err) {
       if (err && err.name === 'RenderingCancelledException') return;
@@ -158,8 +167,8 @@ export class DrawingView {
     this.page = null;
     this.img = null;
     clearTimeout(this.detailTimer);
-    for (const c of this.sheetLayer.querySelectorAll('canvas')) c.width = c.height = 0; // frees memory on iOS
-    this.sheetLayer.replaceChildren();
+    if (this.base && this.base.tagName === 'CANVAS') this.base.width = this.base.height = 0; // frees memory on iOS
+    this.base = null;
     this.removeDetail();
     if (this.objectUrl) URL.revokeObjectURL(this.objectUrl);
     this.objectUrl = null;
@@ -172,6 +181,8 @@ export class DrawingView {
     this.token++;
     this.clearSheet();
     this.resizeObserver.disconnect();
+    cancelAnimationFrame(this.frame);
+    this.screen.width = this.screen.height = 0;
   }
 
   // ---------- Pins ----------
@@ -317,9 +328,8 @@ export class DrawingView {
   }
 
   apply() {
-    this.world.style.transform = `translate(${this.tx}px, ${this.ty}px) scale(${this.s})`;
+    this.requestDraw();
     for (const pin of this.pinLayer.children) this.placePin(pin);
-    this.placeDetail();
     this.scheduleDetail();
     // Zoom changed: regroup overlapping pins (throttled; panning alone doesn't change grouping).
     if (this.items && this.groupScale && Math.abs(Math.log(this.s / this.groupScale)) > 0.03 && !this.regroupTimer) {
@@ -499,7 +509,7 @@ export class DrawingView {
     if (x1 <= x0 || y1 <= y0) return;
     const areaAtWanted = (x1 - x0) * (y1 - y0) * wanted * wanted;
     const scale = wanted * Math.min(1, Math.sqrt(MAX_DETAIL_PIXELS / areaAtWanted));
-    const view = { s: this.s, x0, y0 }; // the zoom this render was made for
+    const view = { s: this.s, x0, y0, scale }; // the zoom this render was made for
 
     // Already showing a sharp render made for this exact view? Nothing to do.
     const v = this.detailView;
@@ -538,30 +548,60 @@ export class DrawingView {
       canvas.width = canvas.height = 0;
       return; // a newer render replaced this one
     }
-    canvas.style.width = `${(canvas.width / scale) * view.s}px`;
-    canvas.style.height = `${(canvas.height / scale) * view.s}px`;
     this.removeDetail();
-    this.detailLayer.append(canvas);
     this.detailCanvas = canvas;
     this.detailView = view;
-    this.placeDetail();
-  }
-
-  // Keeps the sharp render lined up with the sheet while you pan / zoom (it's stretched a
-  // little until the gesture stops and it's re-drawn).
-  placeDetail() {
-    const c = this.detailCanvas;
-    if (!c) return;
-    const v = this.detailView;
-    const x = this.tx + v.x0 * this.s;
-    const y = this.ty + v.y0 * this.s;
-    c.style.transform = `translate(${x}px, ${y}px) scale(${this.s / v.s})`;
+    this.requestDraw();
   }
 
   removeDetail() {
     if (!this.detailCanvas) return;
-    this.detailCanvas.remove();
     this.detailCanvas.width = this.detailCanvas.height = 0;
     this.detailCanvas = null;
+    this.requestDraw();
+  }
+
+  // ---------- The screen canvas ----------
+
+  // Matches the screen canvas to the stage's size (in device pixels, capped like the renders).
+  sizeScreen() {
+    const r = this.stage.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
+    const w = Math.round(r.width * dpr);
+    const h = Math.round(r.height * dpr);
+    if (this.screen.width !== w || this.screen.height !== h) {
+      this.screen.width = w;
+      this.screen.height = h;
+    }
+    this.screenDpr = dpr;
+  }
+
+  // Redraw at the next screen refresh (many pan/zoom steps can arrive per frame).
+  requestDraw() {
+    if (this.frame) return;
+    this.frame = requestAnimationFrame(() => { this.frame = 0; this.drawScreen(); });
+  }
+
+  // Copies the visible part of the sheet onto the screen canvas: white page, the base picture,
+  // then the sharp detail render (stretched a little until the gesture stops and it's redone).
+  drawScreen() {
+    if (!this.screen.width) this.sizeScreen();
+    const ctx = this.screen.getContext('2d');
+    const d = this.screenDpr;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, this.screen.width, this.screen.height);
+    ctx.setTransform(d * this.s, 0, 0, d * this.s, d * this.tx, d * this.ty);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, this.W, this.H);
+    if (this.base) ctx.drawImage(this.base, 0, 0, this.W, this.H);
+    const c = this.detailCanvas;
+    if (c) {
+      const v = this.detailView;
+      ctx.drawImage(c, v.x0, v.y0, c.width / v.scale, c.height / v.scale);
+    }
+    // A thin edge so the sheet stands out from the gray background.
+    ctx.strokeStyle = 'rgba(0, 0, 0, .25)';
+    ctx.lineWidth = 1 / this.s;
+    ctx.strokeRect(0, 0, this.W, this.H);
   }
 }
