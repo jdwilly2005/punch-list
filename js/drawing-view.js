@@ -13,7 +13,7 @@
 //   x=0.5, y=0.5 is always dead-center no matter the zoom or screen size.
 
 import { el, statusKey } from './ui.js';
-import { itemRef } from './db.js';
+import { itemRef, isNumberPending } from './db.js';
 import { getPdf } from './sheet-render.js';
 
 // Memory: iPhone Safari kills the page ("A problem repeatedly occurred") if canvases use too much,
@@ -188,7 +188,9 @@ export class DrawingView {
     const pins = this.groupPins(this.items || []).map((g) => {
       if (g.length === 1) {
         const it = g[0];
-        return this.makePin(it.x, it.y, itemRef(it), { id: it.id, status: statusKey(it.status) });
+        return this.makePin(it.x, it.y, itemRef(it), {
+          id: it.id, status: statusKey(it.status), ...(isNumberPending(it) ? { unsynced: '1' } : {}),
+        });
       }
       const x = g.reduce((sum, it) => sum + it.x, 0) / g.length;
       const y = g.reduce((sum, it) => sum + it.y, 0) / g.length;

@@ -5,7 +5,7 @@
 
 import * as data from './db.js';
 import { el, toast, busy, statusKey, optionCards } from './ui.js';
-import { itemRef, itemName, compareItems, tradesText } from './db.js';
+import { itemRef, itemName, compareItems, tradesText, isNumberPending } from './db.js';
 import { openTradePicker } from './trade-picker.js';
 import { matches, isFiltering, describeFilter } from './filters.js';
 import {
@@ -329,9 +329,11 @@ export function createListView({
     const id = item.id;
     const tr = el('tr', { dataset: { id } });
 
+    const pending = isNumberPending(item);
     const badge = el('button', {
-      type: 'button', class: 'num-badge', dataset: { status: statusKey(item.status) },
-      title: 'Open full item (photos, delete…)', onclick: () => onOpenItem(id),
+      type: 'button', class: 'num-badge', dataset: { status: statusKey(item.status), ...(pending ? { unsynced: '1' } : {}) },
+      title: pending ? 'Not synced yet: this number could still change. Tap to open the full item.' : 'Open full item (photos, delete…)',
+      onclick: () => onOpenItem(id),
     }, itemRef(item));
 
     const textCell = (field, placeholder) => {

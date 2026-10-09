@@ -54,9 +54,14 @@ export function onLocalChange(fn) { localChangeListener = fn; }
 // would refuse the changes anyway). `myRole` on a project is set by sync.js.
 const READ_ONLY_ROLES = ['viewer', 'trade'];
 const readOnlyProjects = new Set();
+const cloudProjects = new Set(); // projects that are in the cloud (see isNumberPending)
 export async function refreshReadOnly() {
   readOnlyProjects.clear();
-  for (const p of await db.projects.toArray()) if (READ_ONLY_ROLES.includes(p.myRole)) readOnlyProjects.add(p.id);
+  cloudProjects.clear();
+  for (const p of await db.projects.toArray()) {
+    if (READ_ONLY_ROLES.includes(p.myRole)) readOnlyProjects.add(p.id);
+    if (p.cloud) cloudProjects.add(p.id);
+  }
 }
 export const isReadOnlyRole = (role) => READ_ONLY_ROLES.includes(role);
 refreshReadOnly().catch(() => {});
@@ -320,11 +325,17 @@ export async function getFileBlob(fileId) {
 // ---------- Item numbers and tags ----------
 //
 // Items are numbered automatically (#1, #2, ...). Numbers are project-wide across
-// all sheets. A new item takes the LOWEST number not in use, so deleting #4 frees
-// #4 for the next new item.
+// all sheets. A new item takes the next number after the highest ever used in the
+// project; numbers are never re-used (deleted #4 stays retired, so old tape, PDFs and
+// notes never point at the wrong item).
 //
 // An item can instead carry a custom tag (e.g. "CB-12", to match Procore). A tagged
-// item gives its number back (number = null). Clearing the tag gives it a number again.
+// item gives up its number (number = null). Clearing the tag gives it a new number.
+//
+// Offline, two people can still pick the same number. The cloud is the referee
+// (supabase/010): the first to sync keeps it, the other gets the next free one, and
+// sync.js tells that person. Until an item has synced its number isn't final
+// (isNumberPending, shown as a dashed outline on pins and in the list).
 
 // "5" or "CB-12" — what goes on the pin and in the # column.
 export function itemRef(item) {
@@ -344,28 +355,30 @@ export function compareItems(a, b) {
   return (a.tag || '').localeCompare(b.tag || '', undefined, { numeric: true, sensitivity: 'base' });
 }
 
-function lowestFreeNumber(items) {
-  const used = new Set(items.map((i) => i.number).filter((n) => n != null));
-  let n = 1;
-  while (used.has(n)) n++;
-  return n;
+// The number the next new item in this project would get: one more than the highest ever used,
+// counting deleted items and what the cloud has seen (project.highestNumber, set by sync.js).
+export async function nextItemNumber(projectId) {
+  const project = await db.projects.get(projectId);
+  let top = project?.highestNumber || 0;
+  await db.items.where('projectId').equals(projectId).each((i) => { if (i.number > top) top = i.number; });
+  return top + 1;
 }
 
-// The number the next new item in this project would get.
-export async function nextItemNumber(projectId) {
-  return lowestFreeNumber(await listItems(projectId));
+// Not in the cloud yet, in a project that is: its number/tag could still change when it syncs.
+export function isNumberPending(item) {
+  return !item.cloud && cloudProjects.has(item.projectId);
 }
 
 // Works out number/tag for an item from what was typed in its "Number / tag" box:
-//   ''         -> automatic number (keeps its current one, or gets the lowest free)
+//   ''         -> automatic number (keeps its current one, or gets the next number)
 //   '12'       -> number 12, if no other item has it
 //   'CB-12'    -> tag CB-12, if no other item has it; the number is given back
 // Throws an Error with a plain-English message if the number/tag is taken.
-function resolveNumber(item, others) {
+function resolveNumber(item, others, next) {
   const typed = String(item.tag || '').trim();
   if (!typed) {
     const keep = item.number != null && !others.some((o) => o.number === item.number);
-    return { tag: '', number: keep ? item.number : lowestFreeNumber(others) };
+    return { tag: '', number: keep ? item.number : next };
   }
   const plain = typed.replace(/^#\s*/, '');
   if (/^\d+$/.test(plain)) {
@@ -403,7 +416,7 @@ export async function saveItem(itemData, photos = []) {
     } else {
       item = newRecord({ drawingId: null, x: null, y: null, trades: [], ...itemData, createdBy: CURRENT_USER });
     }
-    Object.assign(item, resolveNumber(item, others));
+    Object.assign(item, resolveNumber(item, others, await nextItemNumber(item.projectId)));
     await db.items.put(item);
 
     for (const ph of photos) {
@@ -432,11 +445,11 @@ export async function saveItem(itemData, photos = []) {
 // Quick edit of a few fields (used by the list view's inline editing).
 // Changing `tag` re-checks the numbering (see resolveNumber) and may throw.
 export async function updateItem(id, changes) {
-  return db.transaction('rw', db.items, async () => {
+  return db.transaction('rw', db.projects, db.items, async () => {
     const item = { ...(await db.items.get(id)), ...changes, updatedAt: now() };
     if ('tag' in changes) {
       const others = (await listItems(item.projectId)).filter((i) => i.id !== id);
-      Object.assign(item, resolveNumber(item, others));
+      Object.assign(item, resolveNumber(item, others, await nextItemNumber(item.projectId)));
     }
     await db.items.put(item);
     return item;

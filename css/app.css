@@ -303,6 +303,9 @@ input.invalid { border-color: var(--danger); }
   border-top: 13px solid var(--pin-color);
 }
 .pin.pending > span { animation: pulse 1s ease-in-out infinite alternate; }
+/* Not synced yet: the number could still change (db.isNumberPending). */
+.pin[data-unsynced] > span, .num-badge[data-unsynced] { border-style: dashed; }
+.unsynced-hint { display: block; margin-top: 4px; color: #9a4a00; }
 .pin.flash > span { animation: flash .6s ease-in-out 4 alternate; }
 @keyframes flash { to { transform: scale(1.6); box-shadow: 0 0 0 8px rgba(232, 89, 12, .45); } }
 @keyframes pulse { to { transform: scale(1.15); } }

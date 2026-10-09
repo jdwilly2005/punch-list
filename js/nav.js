@@ -140,6 +140,17 @@ function deviceSection() {
 
 // ---------- Bottom left: sync button ----------
 
+// Someone else used the same number/tag while this device was offline; the cloud gave ours a new one.
+function renumberMessage(items) {
+  const where = new Set(items.map((i) => i.projectName)).size === 1 && items[0].projectName ? ` in ${items[0].projectName}` : '';
+  if (items.length === 1) {
+    const { from, to } = items[0];
+    return `Item ${from}${where} is now ${to}: someone else used ${from} while you were offline. Update any tape or notes.`;
+  }
+  const list = items.slice(0, 4).map((i) => `${i.from} → ${i.to}`).join(', ') + (items.length > 4 ? ', …' : '');
+  return `${items.length} items${where} got new numbers because someone else used them while you were offline: ${list}. Update any tape or notes.`;
+}
+
 // Created once; stays on screen across pages. Spins while syncing; its dot shows the state.
 export function syncButton() {
   const btn = el('button', { type: 'button', class: 'sync-fab', 'aria-label': 'Sync now', title: 'Sync now' },
@@ -163,6 +174,7 @@ export function syncButton() {
       }[st.state] || (st.message || 'All synced'), 3500);
     }
   });
+  window.addEventListener('punchlist:renumbered', (e) => toast(renumberMessage(e.detail.items), 9000));
   btn.addEventListener('click', () => {
     wanted = true;
     if (syncStatus().state === 'signed-out') {

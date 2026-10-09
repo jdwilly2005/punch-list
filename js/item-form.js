@@ -148,7 +148,11 @@ export async function openItemForm({ project, drawing, item, onClose, onTradesCh
     el('div', { class: 'pl-sheet-body' },
       field('Title', titleInput),
       el('label', { class: 'field' }, el('span', { class: 'field-label' }, 'Number / tag'), tagInput,
-        el('small', { class: 'field-hint' }, 'Leave blank to number automatically, or type your own tag (e.g. CB-12).')),
+        el('small', { class: 'field-hint' }, 'Leave blank to number automatically, or type your own tag (e.g. CB-12).'),
+        !isNew && data.isNumberPending(item)
+          ? el('small', { class: 'field-hint unsynced-hint' },
+            'Not synced yet: if someone else used this number while you were offline, it will get a new one when it syncs (you\'ll be told).')
+          : null),
       el('div', { class: 'field' }, el('span', { class: 'field-label' }, 'Status'), statusSeg),
       el('div', { class: 'field' }, el('span', { class: 'field-label' }, 'Responsible trades / subs'), tradeChips.node),
       field('Location', locationInput),

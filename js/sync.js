@@ -33,7 +33,8 @@ const COMMON_DOWN = (row) => ({
 const MAP = {
   projects: {
     up: (r) => ({ ...COMMON_UP(r), name: r.name || 'Untitled project', address: r.address || '', trades: r.trades || [], archived_at: iso(r.archivedAt) }),
-    down: (row) => ({ ...COMMON_DOWN(row), name: row.name, address: row.address, trades: row.trades || [], archivedAt: iso(row.archived_at) }),
+    down: (row) => ({ ...COMMON_DOWN(row), name: row.name, address: row.address, trades: row.trades || [], archivedAt: iso(row.archived_at),
+      highestNumber: row.highest_number || 0 }),
   },
   files: {
     up: (r) => ({ ...COMMON_UP(r), project_id: r.projectId, name: r.name || '', type: r.type || '', size: r.blob ? r.blob.size : (r.size ?? null), storage_path: r.storagePath || null }),
@@ -261,10 +262,13 @@ async function runOnce() {
   setStatus({ state: 'syncing', message: '' });
   try {
     const client = await cloud.getClient();
-    const ctx = { client, user, changed: new Set(), problems: [] };
+    const ctx = { client, user, changed: new Set(), problems: [], renumbered: [] };
     await upload(ctx);
     await download(ctx);
     announce(ctx.changed);
+    if (ctx.renumbered.length) {
+      window.dispatchEvent(new CustomEvent('punchlist:renumbered', { detail: { items: ctx.renumbered } }));
+    }
     const pending = await countPending();
     if (ctx.problems.length) {
       setStatus({ state: 'error', message: `Couldn't upload ${ctx.problems.map((n) => `"${n}"`).join(', ')}. It's still saved on this device.`, pending });
@@ -342,11 +346,16 @@ async function upload(ctx) {
 // Sends one batch; if the batch is refused, retries one at a time so one bad record can't block the rest.
 async function upsertBatch(ctx, table, records) {
   const { client } = ctx;
-  const res = await client.from(table).upsert(records.map(MAP[table].up), { onConflict: 'id' }).select('id');
+  const res = await client.from(table).upsert(records.map(MAP[table].up), { onConflict: 'id' })
+    .select(table === 'items' ? 'id, number, tag' : 'id');
   if (!res.error) {
-    const applied = new Set(res.data.map((r) => r.id));
+    const applied = new Map(res.data.map((r) => [r.id, r]));
     for (const r of records) {
       if (!applied.has(r.id)) await needsRefresh(r.projectId);
+      else if (table === 'items') {
+        await takeCloudNumber(ctx, r, applied.get(r.id));
+        if (!r.cloud) ctx.changed.add(r.projectId); // its number is final now: redraw without the "not synced" outline
+      }
       await markClean(table, r, { cloud: 1 });
     }
     return;
@@ -357,6 +366,29 @@ async function upsertBatch(ctx, table, records) {
     return;
   }
   for (const r of records) await upsertBatch(ctx, table, [r]);
+}
+
+// The cloud referees item numbers (supabase/010): if someone else already used this item's
+// number/tag, the cloud gave it a new one. Take it, and remember to tell the person.
+async function takeCloudNumber(ctx, sent, row) {
+  const number = row.number ?? null;
+  const tag = row.tag || '';
+  if (number === (sent.number ?? null) && tag === (sent.tag || '')) return;
+  let moved = false;
+  await data.syncTransaction(['items'], async (tx) => {
+    const now = await tx.table('items').get(sent.id);
+    // Changed again on this device meanwhile? Its next upload gets refereed too.
+    if (!now || (now.number ?? null) !== (sent.number ?? null) || (now.tag || '') !== (sent.tag || '')) return;
+    await tx.table('items').update(sent.id, { number, tag });
+    moved = true;
+  });
+  if (!moved) return;
+  const project = await data.syncDb.projects.get(sent.projectId);
+  ctx.renumbered.push({
+    projectId: sent.projectId, projectName: project?.name || '',
+    from: data.itemName(sent), to: data.itemName({ number, tag }),
+  });
+  ctx.changed.add(sent.projectId);
 }
 
 // Uploads a record's drawing file / photos to Storage and records where they went.
@@ -456,6 +488,10 @@ async function download(ctx) {
       if (local && (local.myRole !== role || local.accessKey !== accessKey(a))) {
         await tx.table('projects').update(row.id, { myRole: role, accessKey: accessKey(a) });
         changed.add(row.id);
+      }
+      // The highest item number the cloud has seen (new items here number after it).
+      if (local && (local.highestNumber || 0) !== (row.highest_number || 0)) {
+        await tx.table('projects').update(row.id, { highestNumber: row.highest_number || 0 });
       }
     }
   });
