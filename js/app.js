@@ -11,7 +11,7 @@ import { el, toast, brandLink, choose, APP_VERSION } from './ui.js';
 import { renderProject } from './project-screen.js';
 import { shareProject, backUpEverything, pickAndImport, lastBackupDate } from './backup.js';
 import { openAccountDialog } from './account.js';
-import { currentUser } from './cloud.js';
+import { currentUser, takeEmailLink, useEmailLink } from './cloud.js';
 
 const app = document.getElementById('app');
 let cleanup = null;
@@ -177,8 +177,27 @@ window.addEventListener('unhandledrejection', (e) => {
   toast(`Error: ${(e.reason && e.reason.message) || e.reason}`, 6000);
 });
 
+// Opened from a link in an account email (confirm email / reset password)? Take its details
+// out of the address bar before routing, then sign in with them.
+const emailLink = takeEmailLink();
 window.addEventListener('hashchange', route);
 route();
+if (emailLink) handleEmailLink(emailLink);
+
+async function handleEmailLink(params) {
+  try {
+    const type = await useEmailLink(params);
+    if (type === 'recovery') {
+      openAccountDialog({ start: 'newpass', onChange: route });
+    } else {
+      toast(type === 'signup' ? 'Email confirmed. You\'re signed in.' : 'You\'re signed in.', 4000);
+      route();
+    }
+  } catch (err) {
+    console.error(err);
+    toast(err.message, 9000);
+  }
+}
 
 // Ask the browser not to clear our data when the phone is low on space.
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});

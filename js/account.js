@@ -1,17 +1,21 @@
-// account.js — the Account pop-up: sign in, create an account (confirmed with an emailed
-// 6-digit code), forgot password, and sign out. The cloud calls live in cloud.js.
+// account.js — the Account pop-up: sign in, create an account (confirmed from an email), forgot
+// password, and sign out. The cloud calls live in cloud.js. The emails hold a link for now, or a
+// 6-digit code once we have our own email sender (cloud.EMAIL_STYLE); both flows are here.
 
 import * as cloud from './cloud.js';
 import { el, toast } from './ui.js';
 
 const MIN_PASSWORD = 8;
 
+const LINKS = cloud.EMAIL_STYLE === 'link';
+
 // Opens the pop-up. onChange() runs after someone signs in or out.
-export async function openAccountDialog({ onChange = () => {} } = {}) {
+// start: 'newpass' after a "Forgot password" email link signed them in.
+export async function openAccountDialog({ onChange = () => {}, start = null } = {}) {
   let user = null;
   try { user = await cloud.currentUser(); } catch { /* offline and never loaded: show sign-in */ }
 
-  let mode = user ? 'account' : 'signin';
+  let mode = start || (user ? 'account' : 'signin');
   let email = user ? user.email : '';
   const title = el('h2', {});
   const body = el('div', { class: 'pl-sheet-body account-body' });
@@ -99,7 +103,7 @@ export async function openAccountDialog({ onChange = () => {} } = {}) {
 
   function render() {
     showError(null);
-    const screens = { signin, signup, verify, forgot, reset, account };
+    const screens = { signin, signup, verify: LINKS ? emailSent : verify, forgot, reset: LINKS ? emailSent : reset, newpass, account };
     body.replaceChildren(...screens[mode]());
     const first = body.querySelector('input');
     if (first && !first.value) setTimeout(() => first.focus(), 50);
@@ -135,7 +139,7 @@ export async function openAccountDialog({ onChange = () => {} } = {}) {
     const e = emailInput();
     const p = passwordInput(`Password (at least ${MIN_PASSWORD} characters)`, 'new-password');
     return [
-      el('p', { class: 'meta' }, 'Use your work email. We\'ll email you a code to confirm it\'s yours.'),
+      el('p', { class: 'meta' }, `Use your work email. We'll email you a ${LINKS ? 'link' : 'code'} to confirm it's yours.`),
       form([e.field, p.field], 'Create account', async () => {
         email = cleanEmail(e.node.value);
         checkEmail(email);
@@ -144,6 +148,48 @@ export async function openAccountDialog({ onChange = () => {} } = {}) {
         go('verify');
       }),
       el('div', { class: 'account-links' }, linkTo('I already have an account', 'signin')),
+    ];
+  }
+
+  // Link-style emails: "check your email, tap the link, then sign in".
+  function emailSent() {
+    const forReset = mode === 'reset';
+    title.textContent = 'Check your email';
+    const resend = link(forReset ? 'Send the email again' : 'Send a new email');
+    resend.addEventListener('click', async () => {
+      showError(null);
+      try {
+        if (forReset) await cloud.sendPasswordResetCode(email);
+        else await cloud.resendSignUpCode(email);
+        toast('Sent. Check your email.');
+      } catch (err) { showError(err); }
+    });
+    const signInBtn = el('button', { type: 'button', class: 'btn btn-primary account-submit' }, 'Sign in');
+    signInBtn.addEventListener('click', () => go('signin'));
+    return [
+      el('p', { class: 'account-big' }, forReset
+        ? `If ${email} has an account, we sent it an email with a link to set a new password.`
+        : `We sent an email to ${email}. Tap "Confirm email address" in it.`),
+      el('p', { class: 'meta' }, forReset
+        ? 'The link opens Punch List, where you choose the new password. It can take a minute to arrive; check spam/junk too.'
+        : 'Then come back and sign in. It can take a minute to arrive; check spam/junk too. If you use Punch List from your home screen, the link may open in your browser instead. That\'s fine: your email is confirmed either way.'),
+      forReset ? null : signInBtn,
+      errorBox,
+      el('div', { class: 'account-links' }, resend, linkTo(forReset ? 'Back to sign in' : 'Use a different email', forReset ? 'signin' : 'signup')),
+    ].filter(Boolean);
+  }
+
+  // Set a new password after a "Forgot password" link signed them in.
+  function newpass() {
+    title.textContent = 'Set a new password';
+    const p = passwordInput(`New password (at least ${MIN_PASSWORD} characters)`, 'new-password');
+    return [
+      el('p', { class: 'meta' }, 'Choose a new password for your account.'),
+      form([p.field], 'Save new password', async () => {
+        checkPassword(p.node.value);
+        await cloud.setNewPassword(p.node.value);
+        done('Password changed. You\'re signed in.');
+      }),
     ];
   }
 
@@ -174,8 +220,8 @@ export async function openAccountDialog({ onChange = () => {} } = {}) {
     title.textContent = 'Forgot password';
     const e = emailInput();
     return [
-      el('p', { class: 'meta' }, 'We\'ll email you a code to set a new password.'),
-      form([e.field], 'Email me a code', async () => {
+      el('p', { class: 'meta' }, LINKS ? 'We\'ll email you a link to set a new password.' : 'We\'ll email you a code to set a new password.'),
+      form([e.field], LINKS ? 'Email me a link' : 'Email me a code', async () => {
         email = cleanEmail(e.node.value);
         checkEmail(email);
         await cloud.sendPasswordResetCode(email);

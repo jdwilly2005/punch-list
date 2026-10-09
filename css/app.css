@@ -108,6 +108,7 @@ input.invalid { border-color: var(--danger); }
 .account-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .account-submit { width: 100%; min-height: 46px; }
 .account-links { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px; }
+.account-big { margin: 0; font-size: 17px; line-height: 1.4; }
 .account-who { display: flex; flex-direction: column; gap: 4px; font-size: 17px; word-break: break-all; }
 .form-error { margin: 0; padding: 10px 12px; border-radius: 10px; background: #fdecea; color: #a1231b; font-size: 14px; line-height: 1.4; }
 .head-spacer { width: 64px; flex: 0 0 auto; }

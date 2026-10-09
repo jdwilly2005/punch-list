@@ -4,15 +4,26 @@
 // What each person may read or change is enforced inside Supabase by row-level security.
 // Never put the service_role / secret key or the database password in this app.
 //
-// Accounts: email + password. A new account is confirmed with a 6-digit code emailed to that
-// address (proves they own it — company auto-join by email domain will rely on this).
-// Forgot password also works with an emailed code. The codes come from the Supabase email
-// templates "Confirm signup" and "Reset password", which must contain {{ .Token }}.
+// Accounts: email + password. A new account must be confirmed from its email (proves they own
+// the address — company auto-join by email domain will rely on this). Forgot password works by email too.
+//
+// EMAIL_STYLE says what those emails contain:
+//   'link' (now)  — Supabase's built-in sender can't have its templates edited, so the emails hold a
+//                   link. Tapping it opens the app with sign-in details after the # (handled by
+//                   handleEmailLink below).
+//   'code' (later) — once we have our own email sender (custom SMTP), edit the "Confirm signup" and
+//                   "Reset password" templates to show {{ .Token }} and switch this to 'code'.
 
 import { loadVendorScript } from './export.js';
 
 const SUPABASE_URL = 'https://prgwxaddeuatfkxmorpp.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_owBNcOSnw8JgAjT8mmjdpw_CbAfhcTR';
+
+export const EMAIL_STYLE = 'link';
+
+// Where email links send people back to: this same app (works for the live site and for testing).
+// Must also be listed in Supabase › Authentication › URL Configuration (Site URL / Redirect URLs).
+const APP_URL = location.origin + location.pathname;
 
 let clientPromise = null;
 
@@ -49,7 +60,7 @@ export async function onAccountChange(fn) {
 
 export async function signUp(email, password) {
   const client = await getClient();
-  const { data, error } = await client.auth.signUp({ email, password });
+  const { data, error } = await client.auth.signUp({ email, password, options: { emailRedirectTo: APP_URL } });
   if (error) throw friendly(error);
   // Supabase hides whether an address is taken: an existing account comes back with no identities.
   if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
@@ -65,7 +76,7 @@ export async function verifySignUp(email, code) {
 
 export async function resendSignUpCode(email) {
   const client = await getClient();
-  const { error } = await client.auth.resend({ type: 'signup', email });
+  const { error } = await client.auth.resend({ type: 'signup', email, options: { emailRedirectTo: APP_URL } });
   if (error) throw friendly(error);
 }
 
@@ -83,7 +94,7 @@ export async function signOut() {
 
 export async function sendPasswordResetCode(email) {
   const client = await getClient();
-  const { error } = await client.auth.resetPasswordForEmail(email);
+  const { error } = await client.auth.resetPasswordForEmail(email, { redirectTo: APP_URL });
   if (error) throw friendly(error);
 }
 
@@ -94,6 +105,43 @@ export async function resetPassword(email, code, newPassword) {
   if (error) throw friendly(error);
   const { error: err2 } = await client.auth.updateUser({ password: newPassword });
   if (err2) throw friendly(err2);
+}
+
+// After a "Forgot password" link signed them in: set the new password.
+export async function setNewPassword(newPassword) {
+  const client = await getClient();
+  const { error } = await client.auth.updateUser({ password: newPassword });
+  if (error) throw friendly(error);
+}
+
+// ---------- Links from account emails ----------
+//
+// A confirm / reset link opens the app as  …/punch-list/#access_token=…&refresh_token=…&type=signup
+// (or #error=…&error_code=otp_expired… if the link is old or already used).
+// Call takeEmailLink() before routing: it removes those details from the address bar and returns them.
+export function takeEmailLink() {
+  const hash = location.hash.replace(/^#\/?/, '');
+  if (!/(^|&)(access_token|error_code|error)=/.test(hash)) return null;
+  const params = Object.fromEntries(new URLSearchParams(hash));
+  history.replaceState(null, '', `${location.pathname}${location.search}#/`);
+  return params;
+}
+
+// Signs in with the link's details. Returns 'signup' | 'recovery' | other type. Throws if the link failed.
+export async function useEmailLink(params) {
+  if (params.error || params.error_code) {
+    const expired = params.error_code === 'otp_expired' || /expired|invalid/i.test(params.error_description || '');
+    throw new Error(expired
+      ? 'That email link has expired or was already used. If you already confirmed, just sign in; otherwise ask for a new email.'
+      : `That email link didn't work: ${(params.error_description || params.error || '').replace(/\+/g, ' ')}`);
+  }
+  const client = await getClient();
+  const { error } = await client.auth.setSession({ access_token: params.access_token, refresh_token: params.refresh_token });
+  if (error) {
+    const f = friendly(error);
+    throw f.code === 'offline' ? f : new Error('That email link didn\'t work. Try signing in, or ask for a new email.');
+  }
+  return params.type || 'signin';
 }
 
 // Supabase's error messages, reworded for people on a job site.
