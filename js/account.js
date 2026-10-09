@@ -257,12 +257,85 @@ export async function openAccountDialog({ onChange = () => {}, start = null } = 
         done('Signed out');
       } catch (err) { showError(err); }
     });
+    const details = el('div', { class: 'account-details' }, el('p', { class: 'meta' }, 'Loading your account…'));
+    loadDetails(details);
     return [
       el('div', { class: 'account-who' }, el('span', { class: 'field-label' }, 'Signed in as'), el('strong', {}, email)),
+      details,
       el('p', { class: 'meta' }, 'Your projects are still saved only on this device. Syncing between devices and sharing with your team come next.'),
       errorBox,
       out,
     ];
+  }
+
+  // Name + company, from the database (needs signal).
+  async function loadDetails(box) {
+    let info;
+    try {
+      info = await cloud.myAccount();
+    } catch (err) {
+      box.replaceChildren(el('p', { class: 'meta' }, `Couldn't load your company details: ${err.message}`));
+      return;
+    }
+    if (!box.isConnected || !info) return;
+
+    // Your name (shown to people on your projects).
+    const nameInput = el('input', {
+      class: 'account-input', type: 'text', value: info.fullName, placeholder: 'First and last name',
+      autocomplete: 'name', maxlength: '120',
+    });
+    let savedName = info.fullName;
+    const saveName = async () => {
+      const v = nameInput.value.trim();
+      if (v === savedName) return;
+      try {
+        await cloud.setMyName(v);
+        savedName = v;
+        toast('Name saved');
+      } catch (err) { showError(err); }
+    };
+    nameInput.addEventListener('change', saveName);
+    nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); nameInput.blur(); } });
+
+    box.replaceChildren(
+      el('label', { class: 'field' }, el('span', { class: 'field-label' }, 'Your name'), nameInput,
+        el('span', { class: 'field-hint' }, 'Shown to people on your projects.')),
+      companySection(info));
+  }
+
+  function companySection(info) {
+    const domain = cloud.emailDomain(info.email);
+    const personal = cloud.isPublicEmailDomain(domain);
+    if (info.company) {
+      const c = info.company;
+      return el('div', { class: 'account-company' },
+        el('span', { class: 'field-label' }, 'Company'),
+        el('strong', {}, c.name),
+        el('span', { class: 'meta' }, info.companyRole === 'admin' ? 'You\'re an admin: you see all of its projects.' : 'Member'),
+        c.domain ? el('span', { class: 'meta' }, `Anyone who signs up with an @${c.domain} email joins automatically.`) : null);
+    }
+    const start = el('button', { type: 'button', class: 'btn account-submit' }, 'Set up your company');
+    start.addEventListener('click', async () => {
+      const name = (window.prompt('Company name (e.g. ABC Builders)') || '').trim();
+      if (!name) return;
+      showError(null);
+      start.disabled = true;
+      try {
+        await cloud.createCompany(name);
+        toast(`${name} is set up. You're its admin.`);
+        render(); // reload this screen with the company
+      } catch (err) {
+        showError(err);
+        start.disabled = false;
+      }
+    });
+    return el('div', { class: 'account-company' },
+      el('span', { class: 'field-label' }, 'Company'),
+      el('span', {}, 'You\'re not part of a company yet.'),
+      el('span', { class: 'meta' }, personal
+        ? `Your email is a personal address (@${domain}), so a company you set up will be invite-only. Co-workers usually sign up with their work email instead.`
+        : `If your company is already set up here, you'd have joined automatically. Otherwise, set it up: anyone who signs up with an @${domain} email will join it, and you'll be its admin.`),
+      start);
   }
 
   function done(message) {

@@ -114,6 +114,45 @@ export async function setNewPassword(newPassword) {
   if (error) throw friendly(error);
 }
 
+// ---------- Profile and company (database tables: profiles, companies — see supabase/*.sql) ----------
+
+// Same list as private.is_public_email_domain in the database: these never become a company's domain.
+const PUBLIC_EMAIL_DOMAINS = new Set([
+  'gmail.com', 'googlemail.com', 'yahoo.com', 'ymail.com', 'outlook.com', 'hotmail.com', 'live.com', 'msn.com',
+  'icloud.com', 'me.com', 'mac.com', 'aol.com', 'proton.me', 'protonmail.com', 'gmx.com', 'mail.com', 'zoho.com',
+  'comcast.net', 'att.net', 'sbcglobal.net', 'verizon.net', 'cox.net', 'charter.net', 'bellsouth.net',
+]);
+export function emailDomain(email) { return String(email || '').split('@')[1]?.toLowerCase() || ''; }
+export function isPublicEmailDomain(domain) { return PUBLIC_EMAIL_DOMAINS.has(domain); }
+
+// { id, email, fullName, company: { id, name, domain } | null, companyRole: 'admin' | 'member' | null }
+export async function myAccount() {
+  const client = await getClient();
+  const user = await currentUser();
+  if (!user) return null;
+  const { data, error } = await client.from('profiles')
+    .select('id, email, full_name, company_role, company:companies(id, name, domain)')
+    .eq('id', user.id).maybeSingle();
+  if (error) throw friendly(error);
+  if (!data) return { id: user.id, email: user.email, fullName: '', company: null, companyRole: null };
+  return { id: data.id, email: data.email, fullName: data.full_name, company: data.company, companyRole: data.company_role };
+}
+
+export async function setMyName(fullName) {
+  const client = await getClient();
+  const user = await currentUser();
+  const { error } = await client.from('profiles').update({ full_name: fullName.trim() }).eq('id', user.id);
+  if (error) throw friendly(error);
+}
+
+// Starts a company with you as its admin. Returns its id.
+export async function createCompany(name) {
+  const client = await getClient();
+  const { data, error } = await client.rpc('create_company', { company_name: name.trim() });
+  if (error) throw friendly(error);
+  return data;
+}
+
 // ---------- Links from account emails ----------
 //
 // A confirm / reset link opens the app as  …/punch-list/#access_token=…&refresh_token=…&type=signup

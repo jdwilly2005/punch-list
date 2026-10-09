@@ -24,7 +24,7 @@ export function el(tag, props = {}, ...children) {
 // App-icon files for the home screen are separate: icons/ and manifest.json.
 // Shown on the Projects screen so you can tell which version a device is running.
 // Must match VERSION in sw.js — bump both on every publish.
-export const APP_VERSION = 'v23';
+export const APP_VERSION = 'v24';
 
 export const BRAND = {
   name: 'Punch List',
