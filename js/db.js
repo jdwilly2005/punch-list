@@ -49,12 +49,34 @@ db.version(3).stores({
 // so they don't count as new local changes.
 let localChangeListener = () => {};
 export function onLocalChange(fn) { localChangeListener = fn; }
+
+// Projects someone else shared with this account as Viewer or Trade are read-only here (the cloud
+// would refuse the changes anyway). `myRole` on a project is set by sync.js.
+const READ_ONLY_ROLES = ['viewer', 'trade'];
+const readOnlyProjects = new Set();
+export async function refreshReadOnly() {
+  readOnlyProjects.clear();
+  for (const p of await db.projects.toArray()) if (READ_ONLY_ROLES.includes(p.myRole)) readOnlyProjects.add(p.id);
+}
+export const isReadOnlyRole = (role) => READ_ONLY_ROLES.includes(role);
+refreshReadOnly().catch(() => {});
+function guardReadOnly(table, obj) {
+  const projectId = table === 'projects' ? obj.id : obj.projectId;
+  if (readOnlyProjects.has(projectId)) {
+    throw new Error('This project is view-only for you. Ask one of its managers if you need to make changes.');
+  }
+}
+
 for (const name of SYNCED_TABLES) {
   db.table(name).hook('creating', (_key, obj, tx) => {
-    if (!tx.fromSync) { obj.dirty = 1; tx.on('complete', () => localChangeListener()); }
+    if (tx.fromSync) return;
+    guardReadOnly(name, obj);
+    obj.dirty = 1;
+    tx.on('complete', () => localChangeListener());
   });
-  db.table(name).hook('updating', (mods, _key, _obj, tx) => {
+  db.table(name).hook('updating', (mods, _key, obj, tx) => {
     if (tx.fromSync) return undefined;
+    guardReadOnly(name, obj);
     tx.on('complete', () => localChangeListener());
     return { dirty: 1 };
   });

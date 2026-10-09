@@ -152,13 +152,42 @@ export async function setMyName(fullName) {
   if (error) throw friendly(error);
 }
 
-// Starts a company with you as its admin. Returns its id.
-export async function createCompany(name) {
+// ---------- People, companies, invites (database functions in supabase/008_people_and_invites.sql) ----------
+// Each throws an Error with a plain-English message (the database writes the messages).
+
+async function rpc(name, args = {}) {
   const client = await getClient();
-  const { data, error } = await client.rpc('create_company', { company_name: name.trim() });
+  const { data, error } = await client.rpc(name, args);
   if (error) throw friendly(error);
   return data;
 }
+
+// { is_owner, pending_request, company: { id, name, domain, invite_only } | null, company_role }
+export const myAccess = () => rpc('my_access');
+export const myProjectRoles = () => rpc('my_project_roles');            // [{ project_id, role }]
+export const requestCompany = (name) => rpc('request_company', { company_name: name });
+export const cancelCompanyRequest = () => rpc('cancel_company_request');
+
+export const ownerListRequests = () => rpc('owner_list_requests');
+export const ownerDecideRequest = (id, approve) => rpc('owner_decide_request', { request_id: id, approve });
+export const ownerListCompanies = () => rpc('owner_list_companies');
+export const ownerCreateCompany = (name, domain, adminEmail) =>
+  rpc('owner_create_company', { company_name: name, company_domain: domain, admin_email: adminEmail });
+
+export const companyPeople = () => rpc('company_people');
+export const companyInvite = (email, role) => rpc('company_invite', { person_email: email, role });
+export const companySetRole = (userId, role) => rpc('company_set_role', { person: userId, role });
+export const companyRemove = (userId) => rpc('company_remove', { person: userId });
+export const companyCancelInvite = (email) => rpc('company_cancel_invite', { person_email: email });
+export const companySetInviteOnly = (flag) => rpc('company_set_invite_only', { flag });
+
+export const projectPeople = (projectId) => rpc('project_people', { pid: projectId });
+export const projectAddPerson = (projectId, email, role, trades = []) =>
+  rpc('project_add_person', { pid: projectId, person_email: email, role, trade_list: trades });
+export const projectRemovePerson = (projectId, email) => rpc('project_remove_person', { pid: projectId, person_email: email });
+
+// The app's web address, for "sign up here" messages.
+export const APP_LINK = 'https://jdwilly2005.github.io/punch-list/';
 
 // ---------- Links from account emails ----------
 //

@@ -11,6 +11,7 @@ import { el, toast, brandLink, choose, APP_VERSION } from './ui.js';
 import { renderProject } from './project-screen.js';
 import { shareProject, backUpEverything, pickAndImport, lastBackupDate } from './backup.js';
 import { openAccountDialog } from './account.js';
+import { openProjectPeople } from './people.js';
 import { currentUser, takeEmailLink, useEmailLink } from './cloud.js';
 import { startSync, syncNow, onSyncStatus, fileMode, setFileMode, freeUpSpace, storageUsed } from './sync.js';
 
@@ -204,6 +205,7 @@ async function projectMenu(project, summary) {
   const action = await choose({
     title: project.name,
     choices: [
+      { label: 'People…', value: 'people', note: 'Add your team, subs or the owner by email, with a role' },
       { label: 'Share project file…', value: 'share', note: 'Send a copy, with photos and drawings, to another person or device' },
       { label: 'Rename', value: 'rename' },
       project.archivedAt
@@ -212,7 +214,10 @@ async function projectMenu(project, summary) {
       { label: 'Delete project…', value: 'delete', kind: 'danger' },
     ],
   });
-  if (action === 'share') {
+  if (action === 'people') {
+    await openProjectPeople(project);
+    return;
+  } else if (action === 'share') {
     await shareProject(project);
     return;
   } else if (action === 'rename') {

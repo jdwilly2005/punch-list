@@ -4,6 +4,7 @@
 
 import * as cloud from './cloud.js';
 import { el, toast } from './ui.js';
+import { openCompanyPeople, openOwnerConsole } from './people.js';
 
 const MIN_PASSWORD = 8;
 
@@ -271,13 +272,15 @@ export async function openAccountDialog({ onChange = () => {}, start = null } = 
   // Name + company, from the database (needs signal).
   async function loadDetails(box) {
     let info;
+    let access;
     try {
-      info = await cloud.myAccount();
+      [info, access] = await Promise.all([cloud.myAccount(), cloud.myAccess()]);
     } catch (err) {
       box.replaceChildren(el('p', { class: 'meta' }, `Couldn't load your company details: ${err.message}`));
       return;
     }
     if (!box.isConnected || !info) return;
+    access = access || {};
 
     // Your name (shown to people on your projects).
     const nameInput = el('input', {
@@ -297,45 +300,65 @@ export async function openAccountDialog({ onChange = () => {}, start = null } = 
     nameInput.addEventListener('change', saveName);
     nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); nameInput.blur(); } });
 
-    box.replaceChildren(
+    box.replaceChildren(...[
       el('label', { class: 'field' }, el('span', { class: 'field-label' }, 'Your name'), nameInput,
         el('span', { class: 'field-hint' }, 'Shown to people on your projects.')),
-      companySection(info));
+      companySection(info, access),
+      access.is_owner ? el('button', {
+        type: 'button', class: 'btn account-submit',
+        onclick: () => { close(); openOwnerConsole(); },
+      }, 'App owner: companies & requests') : null,
+    ].filter(Boolean));
   }
 
-  function companySection(info) {
+  function companySection(info, access) {
     const domain = cloud.emailDomain(info.email);
     const personal = cloud.isPublicEmailDomain(domain);
-    if (info.company) {
-      const c = info.company;
+    const c = access.company;
+    if (c) {
+      const admin = access.company_role === 'admin';
       return el('div', { class: 'account-company' },
         el('span', { class: 'field-label' }, 'Company'),
         el('strong', {}, c.name),
-        el('span', { class: 'meta' }, info.companyRole === 'admin' ? 'You\'re an admin: you see all of its projects.' : 'Member'),
-        c.domain ? el('span', { class: 'meta' }, `Anyone who signs up with an @${c.domain} email joins automatically.`) : null);
+        el('span', { class: 'meta' }, admin ? 'You\'re an admin: you see and manage all of its projects.' : 'Member: you see the projects you\'re added to.'),
+        c.domain && !c.invite_only ? el('span', { class: 'meta' }, `Anyone who signs up with an @${c.domain} email joins automatically.`) : null,
+        c.invite_only ? el('span', { class: 'meta' }, 'Invite-only: people join when an admin adds them.') : null,
+        admin ? el('button', { type: 'button', class: 'btn account-submit', onclick: () => { close(); openCompanyPeople(); } }, 'Manage people') : null);
     }
-    const start = el('button', { type: 'button', class: 'btn account-submit' }, 'Set up your company');
-    start.addEventListener('click', async () => {
-      const name = (window.prompt('Company name (e.g. ABC Builders)') || '').trim();
+    if (access.pending_request) {
+      const cancel = el('button', { type: 'button', class: 'link-btn dark' }, 'Cancel request');
+      cancel.addEventListener('click', async () => {
+        try { await cloud.cancelCompanyRequest(); render(); } catch (err) { showError(err); }
+      });
+      return el('div', { class: 'account-company' },
+        el('span', { class: 'field-label' }, 'Company'),
+        el('strong', {}, `${access.pending_request} (requested)`),
+        el('span', { class: 'meta' }, 'Your request to set up this company is waiting for approval. You\'ll become its admin once it\'s approved.'),
+        el('div', {}, cancel));
+    }
+    const ask = el('button', { type: 'button', class: 'btn account-submit' }, 'Request your company');
+    ask.addEventListener('click', async () => {
+      const name = (window.prompt('Your company\'s name (e.g. ABC Builders)') || '').trim();
       if (!name) return;
       showError(null);
-      start.disabled = true;
+      ask.disabled = true;
       try {
-        await cloud.createCompany(name);
-        toast(`${name} is set up. You're its admin.`);
-        render(); // reload this screen with the company
+        await cloud.requestCompany(name);
+        toast('Request sent. You\'ll be set up as soon as it\'s approved.', 4000);
+        render();
       } catch (err) {
         showError(err);
-        start.disabled = false;
+        ask.disabled = false;
       }
     });
     return el('div', { class: 'account-company' },
       el('span', { class: 'field-label' }, 'Company'),
       el('span', {}, 'You\'re not part of a company yet.'),
       el('span', { class: 'meta' }, personal
-        ? `Your email is a personal address (@${domain}), so a company you set up will be invite-only. Co-workers usually sign up with their work email instead.`
-        : `If your company is already set up here, you'd have joined automatically. Otherwise, set it up: anyone who signs up with an @${domain} email will join it, and you'll be its admin.`),
-      start);
+        ? `Your email is a personal address (@${domain}). Co-workers usually sign up with their work email; a company set up from this account would be invite-only.`
+        : `If your company were already set up here, you'd have joined automatically. You can request it: once approved, you'll be its admin and anyone signing up with an @${domain} email joins it.`),
+      el('span', { class: 'meta' }, 'Projects you share with others (they\'re added by email) work without a company too.'),
+      ask);
   }
 
   function done(message) {

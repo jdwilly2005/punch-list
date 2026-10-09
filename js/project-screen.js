@@ -126,12 +126,17 @@ export async function renderProject(app, projectId, initialTab, isStale) {
   const chipRow = el('div', { class: 'chips', role: 'group', 'aria-label': 'Show statuses' });
   const filterBar = el('div', { class: 'filterbar' }, tradeFilter, chipRow);
 
-  app.replaceChildren(
+  app.replaceChildren(...[ // (filter: a null child would print "null")
     el('header', { class: 'topbar' },
       brandLink({ back: true }),
       el('h1', {}, project.name),
       el('div', { class: 'tabs', role: 'tablist' }, tabBtns.drawing, tabBtns.list, tabBtns.photos)),
-    drawingToolbar, list.toolbar, photos.toolbar, filterBar, drawingPane, list.body, photos.body);
+    data.isReadOnlyRole(project.myRole)
+      ? el('div', { class: 'view-only-note' }, project.myRole === 'trade'
+        ? 'View only: you see the items for your trade(s). Changes can\'t be saved.'
+        : 'View only: you can look, but changes can\'t be saved.')
+      : null,
+    drawingToolbar, list.toolbar, photos.toolbar, filterBar, drawingPane, list.body, photos.body].filter(Boolean));
 
   const view = new DrawingView(stage, {
     onLongPress: (x, y) => (placing ? placeAt(x, y) : newItemAt(x, y)),

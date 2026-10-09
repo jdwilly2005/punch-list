@@ -551,3 +551,27 @@ tr.saved td { animation: saved 1.2s ease-out; }
 .sync-line[data-state=error] { color: var(--danger); }
 .sync-line .link-btn { padding: 0; }
 .device-mode { width: 100%; }
+/* People / company / owner screens (people.js) */
+.people-body { gap: 14px; }
+.people-list { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.person-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%;
+  padding: 10px 14px; min-height: 52px; border: none; border-bottom: 1px solid var(--border);
+  background: var(--surface); color: inherit; font: inherit; text-align: left;
+}
+.people-list > :last-child { border-bottom: none; }
+button.person-row { cursor: pointer; }
+.person-main { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+.person-main small { color: var(--muted); font-size: 13px; }
+.person-role { flex: 0 0 auto; font-size: 13px; font-weight: 600; color: var(--muted); text-align: right; max-width: 45%; }
+.person-role.invited { color: var(--st-progress); }
+.people-subtitle { margin: 6px 0 0; font-size: 15px; }
+.people-add { padding-top: 6px; border-top: 1px solid var(--border); }
+.role-help summary { cursor: pointer; font-size: 14px; color: var(--muted); }
+.role-help ul { margin: 8px 0 0; padding-left: 18px; font-size: 14px; line-height: 1.5; }
+.check-row { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; line-height: 1.4; }
+.check-row input { width: 20px; height: 20px; flex: 0 0 auto; margin-top: 1px; }
+.check-row small { color: var(--muted); }
+.owner-request { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.owner-actions { display: flex; gap: 6px; }
+.view-only-note { padding: 6px 12px; background: #fff4e0; color: #7a4a00; font-size: 13px; font-weight: 600; border-bottom: 1px solid var(--border); }

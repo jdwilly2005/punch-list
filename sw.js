@@ -9,7 +9,7 @@
 // When you add a new file to the app, also add it to APP_FILES.
 // On localhost the network is always used, so local testing never shows stale files.
 
-const VERSION = 'v26';
+const VERSION = 'v27';
 const CACHE = `punchlist-${VERSION}`;
 const APP_FILES = [
   './',
@@ -36,6 +36,7 @@ const APP_FILES = [
   'js/cloud.js',
   'js/account.js',
   'js/sync.js',
+  'js/people.js',
   'vendor/dexie.min.js',
   'vendor/pdf.min.mjs',
   'vendor/pdf.worker.min.mjs',

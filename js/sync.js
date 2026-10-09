@@ -421,16 +421,35 @@ async function download(ctx) {
   const { client, user, changed } = ctx;
   const db = data.syncDb;
 
-  // Every project this account can see (the cloud's security rules decide which).
+  // Every project this account can see (the cloud's security rules decide which), and my role on each.
   const { data: projects, error } = await client.from('projects').select('*');
   if (error) throw new Error(error.message);
+  const access = new Map((await cloud.myProjectRoles()).map((r) => [r.project_id, { role: r.role, trades: r.trades || [] }]));
+  const accessKey = (a) => (a ? `${a.role}|${[...a.trades].sort().join(',')}` : '');
+
+  // Projects this account synced before but can't see any more (removed from the project or the
+  // company): take them off this device.
+  const visible = new Set(projects.map((p) => p.id));
+  for (const local of await db.projects.toArray()) {
+    if (local.cloud && local.syncUser === user.id && !visible.has(local.id)) {
+      await removeProjectFromDevice(local.id);
+      changed.add(local.id);
+    }
+  }
 
   for (const row of projects) {
+    const local = await db.projects.get(row.id);
     const state = (await db.syncState.get(row.id)) || { projectId: row.id, cursors: {} };
+    // What I'm allowed to see changed (e.g. Editor -> Trade)? Re-read the whole project and drop
+    // anything that's no longer visible.
+    const nowKey = accessKey(access.get(row.id));
+    const prune = !!(local && local.accessKey !== undefined && local.accessKey !== nowKey);
+    if (prune) state.cursors = {};
     if (await merge('projects', [row], state.cloudWins, { syncUser: user.id })) changed.add(row.id);
 
     for (const table of TABLES) {
       const since = state.cursors[table];
+      const seen = new Set();
       let from = 0;
       let newest = since || null;
       for (;;) {
@@ -438,6 +457,7 @@ async function download(ctx) {
         if (since) q = q.gt('synced_at', new Date(Date.parse(since) - OVERLAP_MS).toISOString());
         const res = await q;
         if (res.error) throw new Error(res.error.message);
+        for (const r of res.data) seen.add(r.id);
         if (res.data.length) {
           if (await merge(table, res.data, state.cloudWins)) changed.add(row.id);
           newest = res.data[res.data.length - 1].synced_at;
@@ -446,10 +466,40 @@ async function download(ctx) {
         from += PAGE;
       }
       if (newest) state.cursors[table] = newest;
+      if (prune) {
+        const gone = (await db.table(table).where('projectId').equals(row.id).toArray()).filter((r) => r.cloud && !seen.has(r.id));
+        if (gone.length) {
+          await data.syncTransaction([table], (tx) => tx.table(table).bulkDelete(gone.map((r) => r.id)));
+          changed.add(row.id);
+        }
+      }
     }
     state.cloudWins = false;
     await data.syncTransaction(['syncState'], (tx) => tx.table('syncState').put(state));
   }
+
+  // Record my role on each project (Viewer / Trade projects become read-only on this device).
+  await data.syncTransaction(['projects'], async (tx) => {
+    for (const row of projects) {
+      const a = access.get(row.id);
+      const role = a ? a.role : null;
+      const local = await tx.table('projects').get(row.id);
+      if (local && (local.myRole !== role || local.accessKey !== accessKey(a))) {
+        await tx.table('projects').update(row.id, { myRole: role, accessKey: accessKey(a) });
+        changed.add(row.id);
+      }
+    }
+  });
+  await data.refreshReadOnly();
+}
+
+// Removes a project and everything in it from this device only (the cloud is untouched).
+async function removeProjectFromDevice(projectId) {
+  await data.syncTransaction(['projects', ...TABLES, 'syncState'], async (tx) => {
+    for (const t of TABLES) await tx.table(t).where('projectId').equals(projectId).delete();
+    await tx.table('projects').delete(projectId);
+    await tx.table('syncState').delete(projectId);
+  });
 }
 
 // Merges cloud rows into the device. A device record with newer, not-yet-uploaded changes is
