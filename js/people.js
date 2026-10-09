@@ -69,12 +69,35 @@ async function shareSignupLink(email, what) {
 // ---------- Project people ----------
 
 // project: the device's project record. Only works once the project has uploaded.
+// As a pop-up (from the project's ⋯ menu on the Projects screen):
 export async function openProjectPeople(project) {
-  const s = sheet(`People · ${project.name}`);
+  await projectPeopleInto(sheet(`People · ${project.name}`), project);
+}
+
+// As the People tab inside a project: { node, render(project) }.
+export function createPeopleTab() {
+  const body = el('div', { class: 'people-tab-inner' });
+  const errorBox = el('p', { class: 'form-error', role: 'alert', hidden: true });
+  const s = {
+    body,
+    errorBox,
+    isOpen: () => body.isConnected,
+    showError(err) {
+      errorBox.textContent = err ? err.message || String(err) : '';
+      errorBox.hidden = !err;
+    },
+  };
+  return {
+    node: el('div', { class: 'people-tab' }, body),
+    render: (project) => projectPeopleInto(s, project),
+  };
+}
+
+async function projectPeopleInto(s, project) {
   let user = null;
   try { user = await cloud.currentUser(); } catch { /* offline */ }
   if (!user) {
-    s.body.replaceChildren(el('p', {}, 'Sign in (person icon on the Projects screen) to share projects with your team.'));
+    s.body.replaceChildren(el('p', {}, 'Sign in (person icon, top right) to share projects with your team.'));
     return;
   }
   if (!project.cloud) {

@@ -437,15 +437,48 @@ async function download(ctx) {
     }
   }
 
+  // First, the projects themselves and my role on each — before anything else, so a view-only
+  // project is read-only on this device even if the rest of this sync gets interrupted.
+  // What I'm allowed to see changed (e.g. Editor -> Trade)? Then re-read the whole project and drop
+  // anything that's no longer visible (prune).
+  const prune = new Set();
   for (const row of projects) {
     const local = await db.projects.get(row.id);
     const state = (await db.syncState.get(row.id)) || { projectId: row.id, cursors: {} };
-    // What I'm allowed to see changed (e.g. Editor -> Trade)? Re-read the whole project and drop
-    // anything that's no longer visible.
-    const nowKey = accessKey(access.get(row.id));
-    const prune = !!(local && local.accessKey !== undefined && local.accessKey !== nowKey);
-    if (prune) state.cursors = {};
+    if (local && local.accessKey !== undefined && local.accessKey !== accessKey(access.get(row.id))) prune.add(row.id);
     if (await merge('projects', [row], state.cloudWins, { syncUser: user.id })) changed.add(row.id);
+  }
+  await data.syncTransaction(['projects'], async (tx) => {
+    for (const row of projects) {
+      const a = access.get(row.id);
+      const role = a ? a.role : null;
+      const local = await tx.table('projects').get(row.id);
+      if (local && (local.myRole !== role || local.accessKey !== accessKey(a))) {
+        await tx.table('projects').update(row.id, { myRole: role, accessKey: accessKey(a) });
+        changed.add(row.id);
+      }
+    }
+  });
+  await data.refreshReadOnly();
+
+  // In a view-only project, anything made on this device that never reached the cloud can't ever
+  // upload (e.g. pins added before this device knew the project was view-only): remove it.
+  const readOnlyIds = projects.filter((p) => data.isReadOnlyRole(access.get(p.id)?.role)).map((p) => p.id);
+  if (readOnlyIds.length) {
+    await data.syncTransaction(TABLES, async (tx) => {
+      for (const t of TABLES) {
+        const stray = (await tx.table(t).where('projectId').anyOf(readOnlyIds).toArray()).filter((r) => !r.cloud);
+        if (stray.length) {
+          await tx.table(t).bulkDelete(stray.map((r) => r.id));
+          for (const r of stray) changed.add(r.projectId);
+        }
+      }
+    });
+  }
+
+  for (const row of projects) {
+    const state = (await db.syncState.get(row.id)) || { projectId: row.id, cursors: {} };
+    if (prune.has(row.id)) state.cursors = {};
 
     for (const table of TABLES) {
       const since = state.cursors[table];
@@ -466,7 +499,7 @@ async function download(ctx) {
         from += PAGE;
       }
       if (newest) state.cursors[table] = newest;
-      if (prune) {
+      if (prune.has(row.id)) {
         const gone = (await db.table(table).where('projectId').equals(row.id).toArray()).filter((r) => r.cloud && !seen.has(r.id));
         if (gone.length) {
           await data.syncTransaction([table], (tx) => tx.table(table).bulkDelete(gone.map((r) => r.id)));
@@ -477,20 +510,6 @@ async function download(ctx) {
     state.cloudWins = false;
     await data.syncTransaction(['syncState'], (tx) => tx.table('syncState').put(state));
   }
-
-  // Record my role on each project (Viewer / Trade projects become read-only on this device).
-  await data.syncTransaction(['projects'], async (tx) => {
-    for (const row of projects) {
-      const a = access.get(row.id);
-      const role = a ? a.role : null;
-      const local = await tx.table('projects').get(row.id);
-      if (local && (local.myRole !== role || local.accessKey !== accessKey(a))) {
-        await tx.table('projects').update(row.id, { myRole: role, accessKey: accessKey(a) });
-        changed.add(row.id);
-      }
-    }
-  });
-  await data.refreshReadOnly();
 }
 
 // Removes a project and everything in it from this device only (the cloud is untouched).

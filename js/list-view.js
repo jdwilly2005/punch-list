@@ -135,6 +135,7 @@ export function createListView({
   }
 
   function render() {
+    newBtn.hidden = data.isReadOnlyRole(ctx().project.myRole); // view-only: nothing to add
     const { project, items, drawings } = ctx();
     const drawingsById = Object.fromEntries(drawings.map((d) => [d.id, d]));
 
@@ -392,6 +393,12 @@ export function createListView({
       updatedCell);
 
     const currentItem = () => ctx().items.find((i) => i.id === id) || item;
+
+    // View only: the row is just for reading (tap the number to see the whole item).
+    if (data.isReadOnlyRole(project.myRole)) {
+      for (const c of tr.querySelectorAll('input, select')) c.disabled = true;
+      tradeCell.disabled = true;
+    }
 
     async function commit(changes) {
       try {

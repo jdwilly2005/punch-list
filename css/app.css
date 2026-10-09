@@ -91,12 +91,18 @@ input.invalid { border-color: var(--danger); }
 .brand + h1 { margin-left: 4px; }
 /* Projects screen: logo + name centered, name in Oswald */
 .topbar-home { justify-content: center; position: relative; }
-/* Account button, top-right of the Projects screen (absolute so the logo stays centered) */
-.account-btn {
-  position: absolute; right: 10px; bottom: 8px; width: 40px; height: 40px; border-radius: 50%;
+/* ☰ menu + account buttons (nav.js), top right of every screen. On the Projects screen they're
+   pinned to the right so the logo stays centered. */
+.header-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.topbar-home .header-actions { position: absolute; right: 10px; bottom: 8px; }
+.account-btn, .menu-btn {
+  width: 40px; height: 40px; border-radius: 50%; padding: 0;
   display: flex; align-items: center; justify-content: center; cursor: pointer;
   border: 1.5px solid rgba(255,255,255,.55); background: transparent; color: #fff; font: inherit; font-weight: 700; font-size: 17px;
 }
+.menu-btn { border-color: transparent; }
+.ui-icon { display: block; width: 22px; height: 22px; }
+.ui-icon svg { display: block; width: 100%; height: 100%; }
 .account-icon:empty {
   width: 18px; height: 18px; display: block;
   background: currentColor; -webkit-mask: var(--person-icon) center / contain no-repeat; mask: var(--person-icon) center / contain no-repeat;
@@ -575,3 +581,68 @@ button.person-row { cursor: pointer; }
 .owner-request { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--surface); }
 .owner-actions { display: flex; gap: 6px; }
 .view-only-note { padding: 6px 12px; background: #fff4e0; color: #7a4a00; font-size: 13px; font-weight: 600; border-bottom: 1px solid var(--border); }
+
+/* Project header on phones: name + ☰/account on the first row, the four tabs full width below. */
+@media (max-width: 599px) {
+  .topbar:not(.topbar-home) { flex-wrap: wrap; row-gap: 8px; }
+  .topbar:not(.topbar-home) .tabs { order: 3; flex: 1 1 100%; }
+  .topbar:not(.topbar-home) .tab { flex: 1; padding: 4px 6px; }
+}
+
+/* ☰ menu */
+.menu-body { gap: 18px; }
+.menu-section { display: flex; flex-direction: column; gap: 10px; }
+.menu-section .section-title { margin: 0; }
+.menu-section .backup-note { margin: 0; }
+.menu-wide { width: 100%; }
+
+/* Sync button, bottom left of every screen */
+.sync-fab {
+  position: fixed; left: 12px; bottom: calc(12px + var(--safe-bottom)); z-index: 40;
+  width: 44px; height: 44px; border-radius: 50%; padding: 0; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  box-shadow: 0 2px 8px rgba(0,0,0,.22);
+}
+.sync-fab .ui-icon { width: 20px; height: 20px; }
+.sync-fab[data-state=syncing] .ui-icon { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.sync-fab-dot {
+  position: absolute; top: 2px; right: 2px; width: 10px; height: 10px; border-radius: 50%;
+  border: 2px solid var(--surface); background: var(--st-closed);
+}
+.sync-fab[data-state=syncing] .sync-fab-dot { background: var(--st-review); }
+.sync-fab[data-state=offline] .sync-fab-dot { background: var(--st-progress); }
+.sync-fab[data-state=error] .sync-fab-dot { background: var(--danger); }
+.sync-fab[data-state=signed-out] .sync-fab-dot { background: #9aa3ae; }
+/* keep things clear of it */
+.hint, .filter-note { left: 66px; max-width: calc(100% - 150px); }
+.scroll, .photos-scroll { padding-bottom: calc(68px + var(--safe-bottom)); }
+.table-wrap { padding-bottom: calc(60px + var(--safe-bottom)); }
+
+/* People tab inside a project */
+.people-tab { flex: 1; min-height: 0; overflow: auto; padding: 16px; padding-bottom: calc(68px + var(--safe-bottom)); }
+.people-tab-inner { max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+.view-only-note.in-form { margin: 0; border-radius: 10px; border: none; }
+
+/* Photo preview (photo-preview.js) */
+.photo-preview {
+  position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column;
+  background: #111418; color: #fff; padding-top: var(--safe-top); padding-bottom: var(--safe-bottom);
+}
+.preview-head, .preview-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; }
+.preview-title { display: flex; flex-direction: column; min-width: 0; }
+.preview-title strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.preview-title small { color: #aab3bd; font-size: 13px; }
+.preview-close { color: #fff; }
+.preview-stage { flex: 1; min-height: 0; position: relative; display: flex; align-items: center; justify-content: center; }
+.preview-img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+.preview-nav {
+  position: absolute; top: 50%; transform: translateY(-50%); width: 44px; height: 64px;
+  border: none; border-radius: 10px; background: rgba(0,0,0,.45); color: #fff; font-size: 34px; cursor: pointer;
+}
+.preview-nav.prev { left: 8px; }
+.preview-nav.next { right: 8px; }
+.preview-count { color: #aab3bd; font-size: 14px; }
+.preview-actions { display: flex; gap: 8px; margin-left: auto; }
+.sync-line > span:not(.sync-dot) { flex: 1 1 200px; min-width: 0; }

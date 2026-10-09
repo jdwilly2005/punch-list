@@ -13,6 +13,8 @@ import { openTradeManager, resolveTrade } from './trades.js';
 import { createListView } from './list-view.js';
 import { createPhotosView } from './photos-view.js';
 import { openDrawingPdfDialog } from './pdf-export.js';
+import { headerActions } from './nav.js';
+import { createPeopleTab } from './people.js';
 import {
   NO_TRADE, matches, matchesTrade, isFiltering, defaultFilter, loadFilter, saveFilter, describeFilter,
 } from './filters.js';
@@ -59,7 +61,13 @@ export async function renderProject(app, projectId, initialTab, isStale) {
     drawing: el('button', { type: 'button', class: 'tab', role: 'tab', onclick: () => setTab('drawing') }, 'Drawing'),
     list: el('button', { type: 'button', class: 'tab', role: 'tab', onclick: () => setTab('list') }, 'List'),
     photos: el('button', { type: 'button', class: 'tab', role: 'tab', onclick: () => setTab('photos') }, 'Photos'),
+    people: el('button', { type: 'button', class: 'tab', role: 'tab', onclick: () => setTab('people') }, 'People'),
   };
+
+  // Viewers and Trade members can look but not change anything (sync.js sets project.myRole).
+  const readOnly = () => data.isReadOnlyRole(project.myRole);
+  const VIEW_ONLY_MSG = 'You have view-only access to this project, so you can\'t add or change anything.';
+  const startedReadOnly = readOnly();
 
   // ---------- Drawing tab ----------
   const sheetSelect = el('select', { class: 'sheet-select', 'aria-label': 'Sheet' });
@@ -78,12 +86,13 @@ export async function renderProject(app, projectId, initialTab, isStale) {
   const drawingToolbar = el('div', { class: 'toolbar' }, sheetSelect, editBtn, addBtn, pdfBtn, fileInput);
 
   const stage = el('div', { class: 'stage' });
+  const uploadBtn = el('button', { type: 'button', class: 'btn btn-primary', onclick: () => fileInput.click() }, 'Upload drawing');
   const empty = el('div', { class: 'stage-empty' },
     el('p', { class: 'empty-title' }, 'Add a drawing to start dropping pins'),
     el('p', {}, 'PDF (every page becomes a sheet) or an image (JPG / PNG).'),
-    el('button', { type: 'button', class: 'btn btn-primary', onclick: () => fileInput.click() }, 'Upload drawing'));
+    uploadBtn);
   const fitBtn = el('button', { type: 'button', class: 'btn fab', onclick: () => view.fit() }, 'Fit');
-  const hint = el('div', { class: 'hint', hidden: true }, 'Press and hold the drawing to drop a pin · pinch to zoom');
+  const hint = el('div', { class: 'hint', hidden: true }, readOnly() ? 'View only · pinch to zoom, tap a pin to see it' : 'Press and hold the drawing to drop a pin · pinch to zoom');
   const filterCount = el('span', {});
   const filterNote = el('div', { class: 'filter-note', hidden: true }, filterCount,
     el('button', { type: 'button', class: 'link-btn', onclick: clearFilters }, 'Clear filters'));
@@ -112,6 +121,9 @@ export async function renderProject(app, projectId, initialTab, isStale) {
   // ---------- Photos tab ----------
   const photos = createPhotosView({ ctx: () => ({ project, items, filter }), onOpenItem: openExisting });
 
+  // ---------- People tab ----------
+  const peopleTab = createPeopleTab();
+
   // ---------- Filter bar (shared by both tabs) ----------
   const tradeFilter = el('select', { class: 'trade-filter', 'aria-label': 'Filter by trade' });
   tradeFilter.addEventListener('change', () => {
@@ -130,13 +142,14 @@ export async function renderProject(app, projectId, initialTab, isStale) {
     el('header', { class: 'topbar' },
       brandLink({ back: true }),
       el('h1', {}, project.name),
-      el('div', { class: 'tabs', role: 'tablist' }, tabBtns.drawing, tabBtns.list, tabBtns.photos)),
+      el('div', { class: 'tabs', role: 'tablist' }, tabBtns.drawing, tabBtns.list, tabBtns.photos, tabBtns.people),
+      headerActions()),
     data.isReadOnlyRole(project.myRole)
       ? el('div', { class: 'view-only-note' }, project.myRole === 'trade'
         ? 'View only: you see the items for your trade(s). Changes can\'t be saved.'
         : 'View only: you can look, but changes can\'t be saved.')
       : null,
-    drawingToolbar, list.toolbar, photos.toolbar, filterBar, drawingPane, list.body, photos.body].filter(Boolean));
+    drawingToolbar, list.toolbar, photos.toolbar, filterBar, drawingPane, list.body, photos.body, peopleTab.node].filter(Boolean));
 
   const view = new DrawingView(stage, {
     onLongPress: (x, y) => (placing ? placeAt(x, y) : newItemAt(x, y)),
@@ -158,11 +171,14 @@ export async function renderProject(app, projectId, initialTab, isStale) {
     drawingToolbar.hidden = drawingPane.hidden = tab !== 'drawing';
     list.toolbar.hidden = list.body.hidden = tab !== 'list';
     photos.toolbar.hidden = photos.body.hidden = tab !== 'photos';
+    peopleTab.node.hidden = tab !== 'people';
+    filterBar.hidden = tab === 'people';
     // Keep the tab in the address so a reload stays put (replaceState doesn't trigger a re-route).
     history.replaceState(null, '', `#/p/${projectId}${tab === 'drawing' ? '' : `/${tab}`}`);
     if (tab === 'drawing' && !drawingLoaded && drawings.length) showDrawing(lastSheet(projectId));
     if (tab === 'list') list.render();
     if (tab === 'photos') photos.render();
+    if (tab === 'people') peopleTab.render(project);
     refreshFilterBar();
   }
 
@@ -175,6 +191,10 @@ export async function renderProject(app, projectId, initialTab, isStale) {
     const has = drawings.length > 0;
     empty.hidden = has;
     sheetSelect.hidden = editBtn.hidden = pdfBtn.hidden = fitBtn.hidden = !has;
+    if (readOnly()) {
+      editBtn.hidden = addBtn.hidden = uploadBtn.hidden = true;
+      empty.querySelector('.empty-title').textContent = 'No drawings in this project yet';
+    }
     if (current) sheetSelect.value = current.id;
   }
 
@@ -235,6 +255,7 @@ export async function renderProject(app, projectId, initialTab, isStale) {
   // Edit menu for the sheet on screen: rename or delete it.
   async function editSheet() {
     if (!current) return;
+    if (readOnly()) { toast(VIEW_ONLY_MSG, 3500); return; }
     const action = await choose({
       title: current.name,
       choices: [
@@ -348,6 +369,7 @@ export async function renderProject(app, projectId, initialTab, isStale) {
   }
 
   function newItemAt(x, y) {
+    if (readOnly()) { toast(VIEW_ONLY_MSG, 3500); return; }
     view.setPendingPin(x, y);
     showForm({
       project,
@@ -427,6 +449,7 @@ export async function renderProject(app, projectId, initialTab, isStale) {
 
   // From the List tab's "+ Item": an item with no pin (it won't appear on any drawing).
   function newListItem() {
+    if (readOnly()) { toast(VIEW_ONLY_MSG, 3500); return; }
     showForm({
       project,
       drawing: null,
@@ -441,7 +464,7 @@ export async function renderProject(app, projectId, initialTab, isStale) {
     const item = items.find((i) => i.id === id);
     if (!item) return;
     const drawing = drawings.find((d) => d.id === item.drawingId) || null;
-    showForm({ project, drawing, item, onClose: afterForm, onTradesChanged: tradesChanged, canPlace: drawings.length > 0 });
+    showForm({ project, drawing, item, onClose: afterForm, onTradesChanged: tradesChanged, canPlace: drawings.length > 0, readOnly: readOnly() });
   }
 
   // Drawing tab's PDF button: this sheet or every sheet, with the pins the filters show.
@@ -465,7 +488,8 @@ export async function renderProject(app, projectId, initialTab, isStale) {
   }
 
   function refreshFilterBar() {
-    filterBar.hidden = tab === 'drawing' && drawings.length === 0;
+    filterBar.hidden = (tab === 'drawing' && drawings.length === 0) || tab === 'people';
+    if (tab === 'people') return; // no status / trade filters on the People tab
     // Counts follow what's in view: this sheet on the Drawing tab; search/sheet choice on the List tab.
     const scope = { drawing: itemsOnSheet, list: list.scopeItems, photos: () => items }[tab]();
     const count = (test) => scope.filter(test).length;
@@ -512,6 +536,7 @@ export async function renderProject(app, projectId, initialTab, isStale) {
   }
 
   function manageTrades() {
+    if (readOnly()) { toast(VIEW_ONLY_MSG, 3500); return; }
     openTradeManager({
       projectId,
       onClose: async (result) => {
@@ -536,6 +561,11 @@ export async function renderProject(app, projectId, initialTab, isStale) {
     remotePending = false;
     const stillHere = await data.getProject(projectId);
     if (!stillHere) { location.hash = '#/'; return; }
+    // My access changed (e.g. made a Viewer, or an Editor again): redraw the whole screen.
+    if (data.isReadOnlyRole(stillHere.myRole) !== startedReadOnly) {
+      window.dispatchEvent(new Event('punchlist:rerender'));
+      return;
+    }
     drawings = await data.listDrawings(projectId);
     await reloadData();
     if (current && !drawings.some((d) => d.id === current.id)) current = null;

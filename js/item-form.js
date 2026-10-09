@@ -4,6 +4,7 @@ import * as data from './db.js';
 import { el, toast, statusKey, choose } from './ui.js';
 import { preparePhoto, openMarkup } from './photo-markup.js';
 import { createTradeChips } from './trade-picker.js';
+import { openPhotoPreview } from './photo-preview.js';
 
 // Gray "photo not downloaded yet" tile (synced photo opened with no signal).
 const OFFLINE_THUMB = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#dde1e6"/><text x="50" y="47" font-family="sans-serif" font-size="11" text-anchor="middle" fill="#5f6b7a">Not</text><text x="50" y="61" font-family="sans-serif" font-size="11" text-anchor="middle" fill="#5f6b7a">downloaded</text></svg>')}`;
@@ -14,7 +15,8 @@ const OFFLINE_THUMB = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http
 // onTradesChanged(): the project's trade list was changed from inside the form.
 // canPlace: the project has drawings, so offer "Place on a drawing" / "Move pin"
 //   (saves, then onClose({ saved, place: true }) — the project screen does the placing).
-export async function openItemForm({ project, drawing, item, onClose, onTradesChanged = () => {}, canPlace = false }) {
+// readOnly: a Viewer / Trade member's view — everything shown, nothing editable, photos open in the preview.
+export async function openItemForm({ project, drawing, item, onClose, onTradesChanged = () => {}, canPlace = false, readOnly = false }) {
   const isNew = !item.id;
   const photos = isNew ? [] : (await data.listPhotos(item.id)).map((p) => ({ ...p, isNew: false }));
   const objectUrls = [];
@@ -82,6 +84,19 @@ export async function openItemForm({ project, drawing, item, onClose, onTradesCh
   }
 
   async function editPhoto(p) {
+    if (readOnly) {
+      const shown = photos.filter((x) => !x.removed);
+      openPhotoPreview({
+        photos: shown.map((x, n) => ({
+          blob: x.annotatedBlob || x.originalBlob,
+          title: `Item ${data.itemName(item)}${item.title ? ` · ${item.title}` : ''}`,
+          subtitle: `Photo ${n + 1}${x.annotatedBlob ? ' (marked up)' : ''}`,
+          fileName: `Item ${data.itemRef(item)} - ${n + 1}.jpg`,
+        })),
+        index: shown.indexOf(p),
+      });
+      return;
+    }
     if (!p.originalBlob) {
       toast('This photo hasn\'t downloaded yet. It needs signal; try again in a moment.');
       return;
@@ -98,15 +113,15 @@ export async function openItemForm({ project, drawing, item, onClose, onTradesCh
   function renderPhotos() {
     photoGrid.replaceChildren(
       ...photos.filter((p) => !p.removed).map((p) => el('div', { class: 'thumb' },
-        el('button', { type: 'button', class: 'thumb-open', 'aria-label': 'Mark up photo', onclick: () => editPhoto(p) },
+        el('button', { type: 'button', class: 'thumb-open', 'aria-label': readOnly ? 'View photo' : 'Mark up photo', onclick: () => editPhoto(p) },
           el('img', { src: thumbUrl(p), alt: '' })),
-        el('button', {
+        readOnly ? null : el('button', {
           type: 'button', class: 'thumb-remove', 'aria-label': 'Remove photo',
           onclick: () => {
             if (window.confirm('Remove this photo?')) { p.removed = true; renderPhotos(); }
           },
         }, '×'))),
-      el('label', { class: 'thumb add-photo' }, fileInput, el('span', {}, '＋'), el('small', {}, 'Add photo')));
+      readOnly ? el('span', { hidden: true }) : el('label', { class: 'thumb add-photo' }, fileInput, el('span', {}, '＋'), el('small', {}, 'Add photo')));
   }
   renderPhotos();
 
@@ -145,9 +160,24 @@ export async function openItemForm({ project, drawing, item, onClose, onTradesCh
         el('div', { class: 'pin-actions' }, placeBtn, unpinBtn)),
       isNew ? null : el('button', { type: 'button', class: 'btn btn-danger', onclick: remove }, 'Delete item')));
 
+  // View only: show everything, change nothing.
+  if (readOnly) {
+    for (const c of form.querySelectorAll('input, textarea, select')) c.disabled = true;
+    for (const b of tradeChips.node.querySelectorAll('button')) {
+      if (b.classList.contains('trade-chip-tool')) b.hidden = true;
+      else b.disabled = true;
+    }
+    for (const n of form.querySelectorAll('.thumb-remove, .add-photo, .pin-actions, .btn-danger')) n.hidden = true;
+    saveBtn.hidden = true;
+    form.querySelector('.pl-sheet-head .btn-ghost').textContent = 'Close';
+    form.querySelector('.pl-sheet-head h2').textContent += ' · view only';
+    form.querySelector('.pl-sheet-body').prepend(el('p', { class: 'view-only-note in-form' },
+      'You have view-only access to this project, so you can\'t change this item.'));
+  }
+
   const backdrop = el('div', { class: 'pl-layer' }, form);
   document.body.append(backdrop);
-  if (isNew) setTimeout(() => titleInput.focus(), 50);
+  if (isNew && !readOnly) setTimeout(() => titleInput.focus(), 50);
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();

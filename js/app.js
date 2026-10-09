@@ -5,15 +5,17 @@
 //   #/p/<id>        -> a project, Drawing tab
 //   #/p/<id>/list   -> a project, List tab
 //   #/p/<id>/photos -> a project, Photos tab
+//   #/p/<id>/people -> a project, People tab
 
 import * as data from './db.js';
 import { el, toast, brandLink, choose, APP_VERSION } from './ui.js';
 import { renderProject } from './project-screen.js';
-import { shareProject, backUpEverything, pickAndImport, lastBackupDate } from './backup.js';
+import { shareProject } from './backup.js';
 import { openAccountDialog } from './account.js';
 import { openProjectPeople } from './people.js';
-import { currentUser, takeEmailLink, useEmailLink } from './cloud.js';
-import { startSync, syncNow, onSyncStatus, fileMode, setFileMode, freeUpSpace, storageUsed } from './sync.js';
+import { takeEmailLink, useEmailLink } from './cloud.js';
+import { startSync, syncNow, onSyncStatus } from './sync.js';
+import { headerActions, syncButton } from './nav.js';
 
 const app = document.getElementById('app');
 let cleanup = null;
@@ -33,7 +35,7 @@ function route() {
   stopStatus = null;
   const token = ++renderToken;
   const isStale = () => token !== renderToken;
-  const m = location.hash.match(/^#\/p\/([\w-]+)(?:\/(list|photos))?/);
+  const m = location.hash.match(/^#\/p\/([\w-]+)(?:\/(list|photos|people))?/);
   const screen = m
     ? renderProject(app, m[1], m[2] || 'drawing', isStale).then((done) => {
       if (isStale()) { if (done) done(); } else cleanup = done;
@@ -90,61 +92,13 @@ async function renderHome(token) {
       el('div', { class: 'project-list' }, archived))
     : null;
 
-  const last = lastBackupDate();
-  const backup = el('section', { class: 'backup-tools' },
-    el('h2', { class: 'section-title' }, 'Backup & sharing'),
-    el('div', { class: 'backup-buttons' },
-      el('button', { type: 'button', class: 'btn', onclick: importProjects }, 'Import project file'),
-      el('button', {
-        type: 'button', class: 'btn', disabled: !projects.length,
-        onclick: async () => { await backUpEverything(); route(); },
-      }, 'Back up everything')),
-    el('p', { class: 'backup-note' },
-      'To send one project to someone, use its ⋯ menu › Share project file. ',
-      projects.length ? (last ? `Last full backup from this device: ${last}.` : 'No full backup from this device yet.') : null));
-
   const syncLine = el('p', { class: 'sync-line', role: 'status' });
   stopStatus = onSyncStatus((st) => showSyncStatus(syncLine, st));
 
   app.replaceChildren(
-    el('header', { class: 'topbar topbar-home' }, brandLink({ showName: true }), accountButton()),
-    el('main', { class: 'scroll' }, el('h2', { class: 'section-title' }, 'Projects'), syncLine, form, list, archive, backup, deviceSection(),
+    el('header', { class: 'topbar topbar-home' }, brandLink({ showName: true }), headerActions()),
+    el('main', { class: 'scroll' }, el('h2', { class: 'section-title' }, 'Projects'), syncLine, form, list, archive,
       el('p', { class: 'app-version' }, `Version ${APP_VERSION}`)));
-}
-
-// "This device": keep all photos & drawings here, or only what you open; storage used; free up space.
-function deviceSection() {
-  const mode = el('select', { class: 'device-mode', 'aria-label': 'Photos and drawings on this device' },
-    el('option', { value: 'all' }, 'Download everything (works without signal)'),
-    el('option', { value: 'open' }, 'Only what I open (saves space)'));
-  mode.value = fileMode();
-  const used = el('span', {});
-  const refreshUsed = () => storageUsed().then((u) => { used.textContent = u ? `Punch List is using about ${u} on this device.` : ''; });
-  refreshUsed();
-  mode.addEventListener('change', () => {
-    setFileMode(mode.value);
-    toast(mode.value === 'all' ? 'Downloading photos and drawings in the background' : 'Photos and drawings will download when you open them');
-  });
-  const free = el('button', { type: 'button', class: 'btn' }, 'Free up space');
-  free.addEventListener('click', async () => {
-    const all = fileMode() === 'open';
-    const ok = await choose({
-      title: 'Free up space?',
-      message: all
-        ? 'Removes this device\'s copies of photos and drawings that are safely in the cloud. They download again when you open them (needs signal).'
-        : 'Removes this device\'s copies of photos and drawings for ARCHIVED projects that are safely in the cloud. Active projects keep theirs so they work without signal.',
-      choices: [{ label: 'Free up space', value: 'yes', kind: 'primary' }],
-    });
-    if (ok !== 'yes') return;
-    const n = await freeUpSpace();
-    toast(n ? `Cleared ${n} file${n === 1 ? '' : 's'} from this device` : 'Nothing to clear: everything here is still needed or not uploaded yet', 4000);
-    setTimeout(refreshUsed, 1500);
-  });
-  return el('section', { class: 'backup-tools' },
-    el('h2', { class: 'section-title' }, 'This device'),
-    el('label', { class: 'field' }, el('span', { class: 'field-label' }, 'Photos and drawings from the cloud'), mode),
-    el('div', { class: 'backup-buttons' }, free),
-    el('p', { class: 'backup-note' }, used, ' Phones and tablets usually keep everything (for no-signal areas); a computer can save space with "Only what I open". Your item lists always sync in full.'));
 }
 
 // One line under "Projects" saying whether everything is in the cloud.
@@ -177,28 +131,6 @@ window.addEventListener('punchlist:remote-change', () => {
   if (document.querySelector('.pl-layer, .pl-working')) return;
   route();
 });
-
-// Top-right account button: a person icon, or the first letter of the email once signed in.
-function accountButton() {
-  const btn = el('button', {
-    type: 'button', class: 'account-btn', 'aria-label': 'Account – sign in',
-    onclick: () => openAccountDialog({ onChange: accountChanged }),
-  }, el('span', { class: 'account-icon', 'aria-hidden': 'true' }));
-  currentUser().then((user) => {
-    if (!user) return;
-    btn.classList.add('signed-in');
-    btn.setAttribute('aria-label', `Account – signed in as ${user.email}`);
-    btn.firstChild.textContent = user.email[0].toUpperCase();
-  }).catch(() => { /* offline before the account code was ever loaded: keep the sign-in icon */ });
-  return btn;
-}
-
-// Import a .punchlist file. One project opens straight away; several redraw the list.
-async function importProjects() {
-  const done = await pickAndImport();
-  if (done.length === 1) location.hash = `#/p/${done[0].id}`;
-  else if (done.length) route();
-}
 
 // A project's ⋯ menu: rename, archive / un-archive, delete.
 async function projectMenu(project, summary) {
@@ -265,7 +197,10 @@ window.addEventListener('unhandledrejection', (e) => {
 // out of the address bar before routing, then sign in with them.
 const emailLink = takeEmailLink();
 window.addEventListener('hashchange', route);
+window.addEventListener('punchlist:rerender', route);
+window.addEventListener('punchlist:account-changed', accountChanged);
 route();
+document.body.append(syncButton());
 startSync();
 if (emailLink) handleEmailLink(emailLink);
 

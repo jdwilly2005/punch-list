@@ -10,6 +10,7 @@ import { itemRef, itemName, compareItems, tradesText } from './db.js';
 import { el, toast, statusKey } from './ui.js';
 import { matches } from './filters.js';
 import { downloadBlob, loadVendorScript } from './export.js';
+import { openPhotoPreview } from './photo-preview.js';
 
 const PREF_KEY = 'punchlist:photoVersion';
 
@@ -99,13 +100,34 @@ export function createPhotosView({ ctx, onOpenItem }) {
     ].filter(Boolean)); // (replaceChildren would print a leftover null as the text "null")
   }
 
+  // Every photo on screen, in order, so the preview can step through them.
+  function previewFrom(file) {
+    const all = [];
+    for (const { item, files } of current) {
+      files.forEach((f, n) => all.push({
+        file: f,
+        blob: f,
+        title: `Item ${itemName(item)}${item.title ? ` · ${item.title}` : ''}`,
+        subtitle: `Photo ${n + 1} of ${files.length}${version === 'original' ? ' (original)' : ''}${tradesText(item) ? ` · ${tradesText(item)}` : ''}`,
+        fileName: f.name,
+      }));
+    }
+    openPhotoPreview({ photos: all, index: Math.max(0, all.findIndex((p) => p.file === file)) });
+  }
+
   function makeCard(item, files) {
     const thumbs = files.map((file) => {
       const url = URL.createObjectURL(file);
       objectUrls.push(url);
+      // Tap = preview (the Download button below saves files). On a computer the photo can still be
+      // dragged out to the desktop / a Finder folder as a file.
       const link = el('a', {
-        class: 'photo-thumb', href: url, download: file.name, title: `Download ${file.name}`, draggable: 'true',
+        class: 'photo-thumb', href: url, title: `View ${file.name}`, draggable: 'true',
       }, el('img', { src: url, alt: file.name, loading: 'lazy' }));
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        previewFrom(file);
+      });
       // Chrome can drag this straight to the desktop / a Finder folder as a real file.
       link.addEventListener('dragstart', (e) => {
         e.dataTransfer.setData('DownloadURL', `image/jpeg:${file.name}:${url}`);
