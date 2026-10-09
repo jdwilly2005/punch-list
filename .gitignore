@@ -4,3 +4,4 @@ server.py
 samples/
 import_template_punchlist.xlsx
 .DS_Store
+supabase/
