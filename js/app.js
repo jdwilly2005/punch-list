@@ -10,7 +10,7 @@
 import * as data from './db.js';
 import { el, toast, brandLink, choose, APP_VERSION, applyTheme } from './ui.js';
 import { renderProject } from './project-screen.js';
-import { shareProject } from './backup.js';
+import { shareProject, backUpEverything } from './backup.js';
 import { openAccountDialog } from './account.js';
 import { openProjectPeople } from './people.js';
 import { takeEmailLink, useEmailLink } from './cloud.js';
@@ -52,6 +52,7 @@ function route() {
 async function renderHome(token) {
   const projects = await data.listProjects();
   const summaries = await Promise.all(projects.map((p) => data.projectSummary(p.id)));
+  const moved = await movedNote();
   if (token !== renderToken) return;
 
   const nameInput = el('input', {
@@ -97,8 +98,30 @@ async function renderHome(token) {
 
   app.replaceChildren(
     el('header', { class: 'topbar topbar-home' }, brandLink({ showName: true }), headerActions()),
-    el('main', { class: 'scroll' }, el('h2', { class: 'section-title' }, 'Projects'), syncLine, form, list, archive,
+    el('main', { class: 'scroll' }, moved, el('h2', { class: 'section-title' }, 'Projects'), syncLine, form, list, archive,
       el('p', { class: 'app-version' }, `Version ${APP_VERSION}`)));
+}
+
+// The app moved from GitHub Pages to app.scopeoptimized.com (v36). Each web address keeps its own
+// copy of the data, so on the OLD address: point people to the new one, and if this device has
+// anything that never reached the cloud, offer a backup file to import there.
+const OLD_HOST = 'jdwilly2005.github.io';
+const NEW_ADDRESS = 'https://app.scopeoptimized.com/';
+async function movedNote() {
+  if (location.hostname !== OLD_HOST) return null;
+  const local = (await data.listProjects()).filter((p) => !p.cloud);
+  return el('section', { class: 'moved-note' },
+    el('strong', {}, 'Scope Optimized has a new address'),
+    el('p', {}, 'Open ', el('a', { href: NEW_ADDRESS }, 'app.scopeoptimized.com'),
+      ' and sign in: your synced projects will be there. Then add it to your home screen and remove this one.'),
+    local.length
+      ? el('p', {}, local.length === 1
+        ? '1 project on this device isn\'t in the cloud. Back it up first, then use ☰ › Import project file at the new address.'
+        : `${local.length} projects on this device aren't in the cloud. Back them up first, then use ☰ › Import project file at the new address.`)
+      : null,
+    el('div', { class: 'moved-actions' },
+      el('a', { class: 'btn btn-primary', href: NEW_ADDRESS }, 'Go to the new address'),
+      local.length ? el('button', { type: 'button', class: 'btn', onclick: () => backUpEverything() }, 'Back up everything') : null));
 }
 
 // One line under "Projects" saying whether everything is in the cloud.

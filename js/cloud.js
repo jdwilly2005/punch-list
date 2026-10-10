@@ -8,18 +8,19 @@
 // the address — company auto-join by email domain will rely on this). Forgot password works by email too.
 //
 // EMAIL_STYLE says what those emails contain:
-//   'link' (now)  — Supabase's built-in sender can't have its templates edited, so the emails hold a
-//                   link. Tapping it opens the app with sign-in details after the # (handled by
-//                   handleEmailLink below).
-//   'code' (later) — once we have our own email sender (custom SMTP), edit the "Confirm signup" and
-//                   "Reset password" templates to show {{ .Token }} and switch this to 'code'.
+//   'code' (since v36) — our own sender (Resend, noreply@scopeoptimized.com, set up as custom SMTP in
+//                   Supabase) sends a 6-digit code: the "Confirm signup" and "Reset password" templates
+//                   show {{ .Token }}.
+//   'link' (v23–v35) — Supabase's built-in sender couldn't have its templates edited, so the emails held
+//                   a link that opened the app with sign-in details after the # (handled by
+//                   handleEmailLink below; kept so old emails still work).
 
 import { loadVendorScript } from './export.js';
 
 const SUPABASE_URL = 'https://prgwxaddeuatfkxmorpp.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_owBNcOSnw8JgAjT8mmjdpw_CbAfhcTR';
 
-export const EMAIL_STYLE = 'link';
+export const EMAIL_STYLE = 'code';
 
 // Where email links send people back to: this same app (works for the live site and for testing).
 // Must also be listed in Supabase › Authentication › URL Configuration (Site URL / Redirect URLs).
@@ -187,7 +188,7 @@ export const projectAddPerson = (projectId, email, role, trades = []) =>
 export const projectRemovePerson = (projectId, email) => rpc('project_remove_person', { pid: projectId, person_email: email });
 
 // The app's web address, for "sign up here" messages.
-export const APP_LINK = 'https://jdwilly2005.github.io/punch-list/';
+export const APP_LINK = 'https://app.scopeoptimized.com/';
 
 // ---------- Links from account emails ----------
 //

@@ -15,7 +15,7 @@ const FORMAT = 'punchlist-project-file';
 const FORMAT_VERSION = 1;
 const EXT = '.punchlist';
 const MANIFEST = 'punchlist.json';
-const APP_URL = 'https://jdwilly2005.github.io/punch-list/';
+const APP_URL = 'https://app.scopeoptimized.com/';
 const EMAIL_LIMIT = 20 * 1024 * 1024; // most email gives up around 20–25 MB
 const LAST_BACKUP_KEY = 'punchlist:lastBackup';
 
