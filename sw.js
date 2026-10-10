@@ -9,7 +9,7 @@
 // When you add a new file to the app, also add it to APP_FILES.
 // On localhost the network is always used, so local testing never shows stale files.
 
-const VERSION = 'v32';
+const VERSION = 'v33';
 const CACHE = `punchlist-${VERSION}`;
 const APP_FILES = [
   './',
@@ -48,6 +48,7 @@ const APP_FILES = [
   'vendor/supabase.min.js',
   'templates/procore-punch-import.xlsx',
   'brand/logo.png',
+  'brand/logo-color.png',
   'fonts/oswald-700.woff2',
   'icons/icon-180.png',
   'icons/icon-192.png',

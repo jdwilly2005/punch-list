@@ -194,10 +194,10 @@ async function canvasToJpeg(canvas) {
 
 async function embedLogo(out) {
   try {
-    const res = await fetch(BRAND.logo);
+    const res = await fetch(BRAND.logoOnLight);
     if (!res.ok) return null;
     const bytes = await res.arrayBuffer();
-    return /png/i.test(res.headers.get('content-type') || BRAND.logo) ? out.embedPng(bytes) : out.embedJpg(bytes);
+    return /png/i.test(res.headers.get('content-type') || BRAND.logoOnLight) ? out.embedPng(bytes) : out.embedJpg(bytes);
   } catch {
     return null; // no logo on the PDF; not worth failing the export over
   }
@@ -368,9 +368,10 @@ function drawBand(page, { x, y, w, h, fonts, logo, pins, today, title, sheet, fi
   const pad = h * 0.22;
   let left = x + pad;
   if (logo) {
-    const s = h * 0.62;
-    page.drawImage(logo, { x: left, y: y + (h - s) / 2, width: s, height: s });
-    left += s + pad * 0.8;
+    const lh = h * 0.66;
+    const lw = lh * logo.width / logo.height;
+    page.drawImage(logo, { x: left, y: y + (h - lh) / 2, width: lw, height: lh });
+    left += lw + pad * 0.8;
   }
 
   // Legend on the right: a colored dot + "Open 5" for each status with pins on this sheet.

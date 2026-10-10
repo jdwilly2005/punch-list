@@ -5,3 +5,5 @@ samples/
 import_template_punchlist.xlsx
 .DS_Store
 supabase/
+.claude/
+ScopeLogo_*.jpg

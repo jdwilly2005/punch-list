@@ -149,7 +149,7 @@ function drawCover(kit, { project, list, filter, filterText, contents }) {
   let y = H - M;
 
   if (logo) {
-    page.drawImage(logo, { x: M, y: y - 48, width: 48, height: 48 });
+    page.drawImage(logo, { x: M, y: y - 52, width: 52 * logo.width / logo.height, height: 52 });
   }
   y -= 96;
   page.drawText('Punch List', { x: M, y, size: 30, font: fonts.bold, color: ink });

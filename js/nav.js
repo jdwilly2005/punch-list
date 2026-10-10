@@ -5,7 +5,7 @@
 // Screens redraw themselves after menu actions via the window events
 //   'punchlist:rerender' (redraw the current screen) and 'punchlist:account-changed'.
 
-import { el, toast, choose, APP_VERSION } from './ui.js';
+import { el, toast, choose, APP_VERSION, getTheme, setTheme } from './ui.js';
 import { openAccountDialog } from './account.js';
 import { currentUser } from './cloud.js';
 import { backUpEverything, pickAndImport, lastBackupDate } from './backup.js';
@@ -132,7 +132,14 @@ function deviceSection() {
     toast(n ? `Cleared ${n} file${n === 1 ? '' : 's'} from this device` : 'Nothing to clear: everything here is still needed or not uploaded yet', 4000);
     setTimeout(refreshUsed, 1500);
   });
+  const theme = el('select', { class: 'device-mode', 'aria-label': 'Appearance' },
+    el('option', { value: 'auto' }, 'Auto (match this phone or computer)'),
+    el('option', { value: 'light' }, 'Light'),
+    el('option', { value: 'dark' }, 'Dark'));
+  theme.value = getTheme();
+  theme.addEventListener('change', () => setTheme(theme.value));
   return section('This device',
+    el('label', { class: 'field' }, el('span', { class: 'field-label' }, 'Appearance'), theme),
     el('label', { class: 'field' }, el('span', { class: 'field-label' }, 'Photos and drawings from the cloud'), mode),
     el('div', { class: 'backup-buttons' }, free),
     el('p', { class: 'backup-note' }, used, 'Phones and tablets usually keep everything (for no-signal areas); a computer can save space with "Only what I open". Your item lists always sync in full.'));

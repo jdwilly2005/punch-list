@@ -19,17 +19,48 @@ export function el(tag, props = {}, ...children) {
 
 // ---------- Brand ----------
 // The app's name and logo live here (and in brand/). To rebrand, replace
-// brand/logo.png (square, ~192px; PNG or JPG) and change BRAND.name. The logo is
-// used in the top bar (as the "home" button) and on exported drawing PDFs.
+// brand/logo.png (white + light blue, for the navy top bar, where it's the "home"
+// button) and brand/logo-color.png (full color, for white PDF pages), and change BRAND.name.
+// Both are made from the original logo artwork; keep them see-through (PNG).
 // App-icon files for the home screen are separate: icons/ and manifest.json.
 // Shown on the Projects screen so you can tell which version a device is running.
 // Must match VERSION in sw.js — bump both on every publish.
-export const APP_VERSION = 'v32';
+export const APP_VERSION = 'v33';
 
 export const BRAND = {
   name: 'Punch List',
   logo: new URL('../brand/logo.png', import.meta.url).href,
+  logoOnLight: new URL('../brand/logo-color.png', import.meta.url).href,
 };
+
+// ---------- Light / dark appearance ----------
+// 'auto' follows the phone's setting; 'light'/'dark' force it on this device.
+// The colors themselves are in css/app.css; index.html applies the saved choice before
+// the page draws, so there's no white flash at night.
+const THEME_KEY = 'punchlist:theme';
+const HEADER_COLORS = { light: '#1a315d', dark: '#132544' }; // = --header in css/app.css
+
+export function getTheme() {
+  try { return localStorage.getItem(THEME_KEY) || 'auto'; } catch { return 'auto'; }
+}
+
+export function setTheme(theme) {
+  try {
+    if (theme === 'auto') localStorage.removeItem(THEME_KEY);
+    else localStorage.setItem(THEME_KEY, theme);
+  } catch { /* private mode: still applies until the page reloads */ }
+  applyTheme();
+}
+
+// Sets html[data-theme] and the browser's top-bar color to match.
+export function applyTheme() {
+  const theme = getTheme();
+  if (theme === 'auto') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = theme;
+  const dark = theme === 'dark' || (theme === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+  document.querySelector('meta[name=theme-color]')?.setAttribute('content', HEADER_COLORS[dark ? 'dark' : 'light']);
+}
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', applyTheme);
 
 // Top-bar logo that goes back to the Projects screen.
 // showName: also show the app name next to it (the Projects screen does).

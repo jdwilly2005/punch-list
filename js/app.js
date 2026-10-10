@@ -8,7 +8,7 @@
 //   #/p/<id>/people -> a project, People tab
 
 import * as data from './db.js';
-import { el, toast, brandLink, choose, APP_VERSION } from './ui.js';
+import { el, toast, brandLink, choose, APP_VERSION, applyTheme } from './ui.js';
 import { renderProject } from './project-screen.js';
 import { shareProject } from './backup.js';
 import { openAccountDialog } from './account.js';
@@ -195,6 +195,7 @@ window.addEventListener('unhandledrejection', (e) => {
 
 // Opened from a link in an account email (confirm email / reset password)? Take its details
 // out of the address bar before routing, then sign in with them.
+applyTheme();
 const emailLink = takeEmailLink();
 window.addEventListener('hashchange', route);
 window.addEventListener('punchlist:rerender', route);
