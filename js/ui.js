@@ -25,10 +25,10 @@ export function el(tag, props = {}, ...children) {
 // App-icon files for the home screen are separate: icons/ and manifest.json.
 // Shown on the Projects screen so you can tell which version a device is running.
 // Must match VERSION in sw.js — bump both on every publish.
-export const APP_VERSION = 'v34';
+export const APP_VERSION = 'v35';
 
 export const BRAND = {
-  name: 'Punch List',
+  name: 'Scope Optimized',
   logo: new URL('../brand/logo.png', import.meta.url).href,
   logoOnLight: new URL('../brand/logo-color.png', import.meta.url).href,
 };

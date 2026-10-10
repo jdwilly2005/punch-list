@@ -1,14 +1,5 @@
 /* Punch List styles. Mobile first; colors are defined once here. */
 
-/* Oswald (bold) — used only for the app name in the logo. Stored in fonts/ so it works offline. */
-@font-face {
-  font-family: 'Oswald';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('../fonts/oswald-700.woff2') format('woff2');
-}
-
 :root {
   --bg: #eef0f3;
   --surface: #ffffff;
@@ -130,7 +121,7 @@ input.invalid { border-color: var(--danger); }
 .brand-logo { height: 36px; width: auto; display: block; }
 .brand-back { font-size: 26px; font-weight: 400; line-height: 1; margin: -2px -2px 0 0; }
 .brand + h1 { margin-left: 4px; }
-/* Projects screen: logo + name centered, name in Oswald */
+/* Projects screen: logo + name centered */
 .topbar-home { justify-content: center; position: relative; }
 /* ☰ menu + account buttons (nav.js), top right of every screen. On the Projects screen they're
    pinned to the right so the logo stays centered. */
@@ -160,7 +151,9 @@ input.invalid { border-color: var(--danger); }
 .form-error { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--error-bg); color: var(--error-text); font-size: 14px; line-height: 1.4; }
 .head-spacer { width: 64px; flex: 0 0 auto; }
 .topbar-home .brand-logo { height: 40px; width: auto; }
-.brand-name { font-family: 'Oswald', -apple-system, BlinkMacSystemFont, sans-serif; font-weight: 700; font-size: 27px; line-height: 1; letter-spacing: .01em; }
+.brand-name { font-weight: 700; font-size: 18px; line-height: 1.1; } /* same as the screen titles (.topbar h1) */
+/* Narrow phones (e.g. iPhone SE): a centered name would run into the ☰ / account buttons. */
+@media (max-width: 399px) { .topbar-home { justify-content: flex-start; } }
 @media (max-width: 479px) {
   .tab { padding: 4px 9px; font-size: 13px; }
 }

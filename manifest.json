@@ -1,6 +1,6 @@
 {
-  "name": "Punch List",
-  "short_name": "Punch List",
+  "name": "Scope Optimized",
+  "short_name": "Scope Optimized",
   "description": "Drop pins on drawings to track construction punch items, even offline.",
   "start_url": "./",
   "scope": "./",

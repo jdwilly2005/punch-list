@@ -75,7 +75,7 @@ export async function openMenu() {
       el('p', { class: 'backup-note' }, 'Sign in, your name, your company and its people.')),
     backupSection(projects, close),
     deviceSection(),
-    el('p', { class: 'app-version' }, `Punch List · Version ${APP_VERSION}`));
+    el('p', { class: 'app-version' }, `Scope Optimized · Version ${APP_VERSION}`));
 }
 
 function section(title, ...children) {
@@ -111,7 +111,7 @@ function deviceSection() {
     el('option', { value: 'open' }, 'Only what I open (saves space)'));
   mode.value = fileMode();
   const used = el('span', {});
-  const refreshUsed = () => storageUsed().then((u) => { used.textContent = u ? `Punch List is using about ${u} on this device. ` : ''; });
+  const refreshUsed = () => storageUsed().then((u) => { used.textContent = u ? `Scope Optimized is using about ${u} on this device. ` : ''; });
   refreshUsed();
   mode.addEventListener('change', () => {
     setFileMode(mode.value);

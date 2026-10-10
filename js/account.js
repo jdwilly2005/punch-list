@@ -172,8 +172,8 @@ export async function openAccountDialog({ onChange = () => {}, start = null } = 
         ? `If ${email} has an account, we sent it an email with a link to set a new password.`
         : `We sent an email to ${email}. Tap "Confirm email address" in it.`),
       el('p', { class: 'meta' }, forReset
-        ? 'The link opens Punch List, where you choose the new password. It can take a minute to arrive; check spam/junk too.'
-        : 'Then come back and sign in. It can take a minute to arrive; check spam/junk too. If you use Punch List from your home screen, the link may open in your browser instead. That\'s fine: your email is confirmed either way.'),
+        ? 'The link opens Scope Optimized, where you choose the new password. It can take a minute to arrive; check spam/junk too.'
+        : 'Then come back and sign in. It can take a minute to arrive; check spam/junk too. If you use Scope Optimized from your home screen, the link may open in your browser instead. That\'s fine: your email is confirmed either way.'),
       forReset ? null : signInBtn,
       errorBox,
       el('div', { class: 'account-links' }, resend, linkTo(forReset ? 'Back to sign in' : 'Use a different email', forReset ? 'signin' : 'signup')),

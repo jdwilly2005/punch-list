@@ -50,11 +50,11 @@ const roleText = (p) => {
 // After adding someone who has no account yet: nothing is emailed automatically (yet), so offer
 // to send them the sign-up link.
 async function shareSignupLink(email, what) {
-  const text = `You've been added to ${what} in Punch List. Sign up at ${cloud.APP_LINK} using ${email} and it'll be there.`;
+  const text = `You've been added to ${what} in Scope Optimized. Sign up at ${cloud.APP_LINK} using ${email} and it'll be there.`;
   const canShare = !!navigator.share;
   const pick = await choose({
     title: `${email} doesn't have an account yet`,
-    message: `They're on the list: as soon as they sign up with ${email} (and confirm it), they'll have access. Punch List doesn't email invitations yet, so send them the link:`,
+    message: `They're on the list: as soon as they sign up with ${email} (and confirm it), they'll have access. Scope Optimized doesn't email invitations yet, so send them the link:`,
     choices: [
       canShare ? { label: 'Send the sign-up link…', value: 'share', kind: 'primary', note: 'Text, email, Teams…' } : null,
       { label: 'Copy the message', value: 'copy', kind: canShare ? undefined : 'primary' },

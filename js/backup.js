@@ -33,7 +33,7 @@ export async function shareProject(project) {
 export async function backUpEverything() {
   const projects = await data.listProjects();
   if (!projects.length) return toast('No projects to back up yet.');
-  const file = await buildFile(projects.map((p) => p.id), `Punch List backup ${today()}${EXT}`);
+  const file = await buildFile(projects.map((p) => p.id), `Scope Optimized backup ${today()}${EXT}`);
   if (file && await deliver(file, { title: 'Backup ready', backup: true })) {
     try { localStorage.setItem(LAST_BACKUP_KEY, new Date().toISOString()); } catch { /* private mode */ }
   }
@@ -101,8 +101,8 @@ async function deliver(file, { title, backup = false }) {
     : 'Send it by AirDrop, text, email, or a Google Drive / Dropbox link.';
   const message = backup
     ? `${file.name} · ${formatSize(file.size)}. Keep it somewhere other than this device, like Files › iCloud Drive or Google Drive. `
-      + 'To restore, open Punch List and tap "Import project file".'
-    : `${file.name} · ${formatSize(file.size)}. ${how} The other person opens Punch List and taps "Import project file".`;
+      + 'To restore, open Scope Optimized and tap "Import project file".'
+    : `${file.name} · ${formatSize(file.size)}. ${how} The other person opens Scope Optimized and taps "Import project file".`;
   const choice = await choose({
     title,
     message,
@@ -116,7 +116,7 @@ async function deliver(file, { title, backup = false }) {
       await navigator.share({
         files: [file],
         title: file.name,
-        text: backup ? undefined : `Punch List project file. Open ${APP_URL} and tap "Import project file".`,
+        text: backup ? undefined : `Scope Optimized project file. Open ${APP_URL} and tap "Import project file".`,
       });
       return true;
     } catch (err) {
@@ -164,12 +164,12 @@ async function importFile(file) {
   } catch (err) {
     console.error(err);
     hide();
-    toast(`"${file.name}" isn't a Punch List project file.`, 6000);
+    toast(`"${file.name}" isn't a Scope Optimized project file.`, 6000);
     return [];
   }
   hide();
   if (manifest.formatVersion > FORMAT_VERSION) {
-    toast('This file was made by a newer version of Punch List. Update the app (close and reopen it), then try again.', 8000);
+    toast('This file was made by a newer version of Scope Optimized. Update the app (close and reopen it), then try again.', 8000);
     return [];
   }
   if (!manifest.projects.length) {
