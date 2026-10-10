@@ -9,7 +9,7 @@
 // When you add a new file to the app, also add it to APP_FILES.
 // On localhost the network is always used, so local testing never shows stale files.
 
-const VERSION = 'v33';
+const VERSION = 'v34';
 const CACHE = `punchlist-${VERSION}`;
 const APP_FILES = [
   './',
@@ -50,9 +50,9 @@ const APP_FILES = [
   'brand/logo.png',
   'brand/logo-color.png',
   'fonts/oswald-700.woff2',
-  'icons/icon-180.png',
-  'icons/icon-192.png',
-  'icons/icon-512.png',
+  'icons/app-icon-180.png',
+  'icons/app-icon-192.png',
+  'icons/app-icon-512.png',
 ];
 
 const IS_LOCAL = ['localhost', '127.0.0.1'].includes(self.location.hostname);
